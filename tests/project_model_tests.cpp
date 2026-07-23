@@ -445,3 +445,340 @@ TEST_CASE("Project model: save_project preserves filesystem diagnostics in detai
 
     fs::remove(temp_dir);
 }
+
+TEST_CASE("Project model: create_project has empty assets", "[project_model]")
+{
+    auto outcome = mvlab::create_project("Assets Test");
+
+    REQUIRE(outcome.has_value());
+    const auto& project = outcome.value();
+    REQUIRE(project.assets.empty());
+}
+
+TEST_CASE("Project model: save_project writes empty assets array", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "empty_assets";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    auto project = mvlab::create_project("Empty Assets Test").value();
+    auto save_outcome = mvlab::save_project(project, file_path);
+
+    REQUIRE(save_outcome.has_value());
+
+    std::ifstream file(file_path);
+    nlohmann::json j;
+    file >> j;
+    file.close();
+
+    REQUIRE(j.contains("assets"));
+    REQUIRE(j["assets"].is_array());
+    REQUIRE(j["assets"].empty());
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: project with one asset round trips", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "one_asset";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    auto project = mvlab::create_project("One Asset Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-001",
+        mvlab::MediaAssetType::audio,
+        "Background Music",
+        "media/audio/bg.mp3",
+        5000000
+    });
+
+    auto save_outcome = mvlab::save_project(project, file_path);
+    REQUIRE(save_outcome.has_value());
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE(load_outcome.has_value());
+    const auto& loaded = load_outcome.value();
+
+    REQUIRE(loaded.assets.size() == 1);
+    CHECK(loaded.assets[0].id == "asset-001");
+    CHECK(loaded.assets[0].type == mvlab::MediaAssetType::audio);
+    CHECK(loaded.assets[0].display_name == "Background Music");
+    CHECK(loaded.assets[0].relative_path == "media/audio/bg.mp3");
+    CHECK(loaded.assets[0].file_size == 5000000);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: project with multiple assets preserves order", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "multi_assets";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    auto project = mvlab::create_project("Multi Asset Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-001", mvlab::MediaAssetType::audio, "Music", "media/audio.mp3", 1000000
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-002", mvlab::MediaAssetType::image, "Cover", "media/cover.png", 256000
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-003", mvlab::MediaAssetType::video, "Background", "media/video.mp4", 50000000
+    });
+
+    auto save_outcome = mvlab::save_project(project, file_path);
+    REQUIRE(save_outcome.has_value());
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE(load_outcome.has_value());
+    const auto& loaded = load_outcome.value();
+
+    REQUIRE(loaded.assets.size() == 3);
+    CHECK(loaded.assets[0].id == "asset-001");
+    CHECK(loaded.assets[1].id == "asset-002");
+    CHECK(loaded.assets[2].id == "asset-003");
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: load_project handles missing assets field (backward compatibility)", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "no_assets_field";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    nlohmann::json j;
+    j["schema_version"] = 1;
+    j["name"] = "Old Project";
+    j["audio"] = nlohmann::json::object();
+    j["background"] = nlohmann::json::object();
+    j["lyrics"] = nlohmann::json::object();
+    j["export_settings"] = {{"width", 1920}, {"height", 1080}, {"fps", 30}};
+
+    std::ofstream file(file_path);
+    file << j.dump(2);
+    file.close();
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE(load_outcome.has_value());
+    const auto& loaded = load_outcome.value();
+    CHECK(loaded.assets.empty());
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: malformed assets field type fails", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "bad_assets_type";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    nlohmann::json j;
+    j["schema_version"] = 1;
+    j["name"] = "Bad Assets";
+    j["audio"] = nlohmann::json::object();
+    j["background"] = nlohmann::json::object();
+    j["lyrics"] = nlohmann::json::object();
+    j["export_settings"] = {{"width", 1920}, {"height", 1080}, {"fps", 30}};
+    j["assets"] = "not an array";
+
+    std::ofstream file(file_path);
+    file << j.dump(2);
+    file.close();
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE_FALSE(load_outcome.has_value());
+    CHECK(load_outcome.error().code == mvlab::ErrorCode::malformed_project);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: malformed asset entry fails", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "bad_asset_entry";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    nlohmann::json j;
+    j["schema_version"] = 1;
+    j["name"] = "Bad Asset Entry";
+    j["audio"] = nlohmann::json::object();
+    j["background"] = nlohmann::json::object();
+    j["lyrics"] = nlohmann::json::object();
+    j["export_settings"] = {{"width", 1920}, {"height", 1080}, {"fps", 30}};
+    j["assets"] = nlohmann::json::array();
+    j["assets"].push_back(nlohmann::json{
+        {"id", "asset-001"},
+        {"type", "audio"},
+        {"display_name", "Music"}
+    });
+
+    std::ofstream file(file_path);
+    file << j.dump(2);
+    file.close();
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE_FALSE(load_outcome.has_value());
+    CHECK(load_outcome.error().code == mvlab::ErrorCode::malformed_project);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: unknown media type in asset fails", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "bad_type";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    nlohmann::json j;
+    j["schema_version"] = 1;
+    j["name"] = "Bad Type";
+    j["audio"] = nlohmann::json::object();
+    j["background"] = nlohmann::json::object();
+    j["lyrics"] = nlohmann::json::object();
+    j["export_settings"] = {{"width", 1920}, {"height", 1080}, {"fps", 30}};
+    j["assets"] = nlohmann::json::array();
+    j["assets"].push_back(nlohmann::json{
+        {"id", "asset-001"},
+        {"type", "unknown"},
+        {"display_name", "Bad Asset"},
+        {"relative_path", "media/file"},
+        {"file_size", 1000}
+    });
+
+    std::ofstream file(file_path);
+    file << j.dump(2);
+    file.close();
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE_FALSE(load_outcome.has_value());
+    CHECK(load_outcome.error().code == mvlab::ErrorCode::malformed_project);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: invalid asset validation propagates through project validation", "[project_model]")
+{
+    auto project = mvlab::create_project("Invalid Asset").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "",
+        mvlab::MediaAssetType::audio,
+        "Music",
+        "media/audio.mp3",
+        1000000
+    });
+
+    auto outcome = mvlab::validate_project(project);
+
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK(outcome.error().message.find("ID cannot be empty") != std::string::npos);
+}
+
+TEST_CASE("Project model: duplicate asset IDs are rejected", "[project_model]")
+{
+    auto project = mvlab::create_project("Duplicate IDs").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-001", mvlab::MediaAssetType::audio, "Track 1", "media/track1.mp3", 1000000
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-001", mvlab::MediaAssetType::audio, "Track 2", "media/track2.mp3", 2000000
+    });
+
+    auto outcome = mvlab::validate_project(project);
+
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK(outcome.error().message.find("Duplicate asset ID") != std::string::npos);
+}
+
+TEST_CASE("Project model: two distinct IDs with identical fields are accepted", "[project_model]")
+{
+    auto project = mvlab::create_project("Distinct IDs").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-001", mvlab::MediaAssetType::audio, "Music", "media/audio.mp3", 1000000
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-002", mvlab::MediaAssetType::audio, "Music", "media/audio.mp3", 1000000
+    });
+
+    auto outcome = mvlab::validate_project(project);
+
+    REQUIRE(outcome.has_value());
+}
+
+TEST_CASE("Project model: save_project with assets round trip preserves all fields", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "assets_roundtrip";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    auto project = mvlab::create_project("Full Asset Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-audio-1",
+        mvlab::MediaAssetType::audio,
+        "Main Soundtrack",
+        "media/audio/main.wav",
+        10485760
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-image-2",
+        mvlab::MediaAssetType::image,
+        "Thumbnail",
+        "media/images/thumb.jpg",
+        51200
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-video-3",
+        mvlab::MediaAssetType::video,
+        "Background Loop",
+        "media/videos/loop.mov",
+        314572800
+    });
+
+    auto save_outcome = mvlab::save_project(project, file_path);
+    REQUIRE(save_outcome.has_value());
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE(load_outcome.has_value());
+    const auto& loaded = load_outcome.value();
+
+    REQUIRE(loaded.assets.size() == 3);
+
+    CHECK(loaded.assets[0].id == "asset-audio-1");
+    CHECK(loaded.assets[0].type == mvlab::MediaAssetType::audio);
+    CHECK(loaded.assets[0].display_name == "Main Soundtrack");
+    CHECK(loaded.assets[0].relative_path == "media/audio/main.wav");
+    CHECK(loaded.assets[0].file_size == 10485760);
+
+    CHECK(loaded.assets[1].id == "asset-image-2");
+    CHECK(loaded.assets[1].type == mvlab::MediaAssetType::image);
+    CHECK(loaded.assets[1].display_name == "Thumbnail");
+    CHECK(loaded.assets[1].relative_path == "media/images/thumb.jpg");
+    CHECK(loaded.assets[1].file_size == 51200);
+
+    CHECK(loaded.assets[2].id == "asset-video-3");
+    CHECK(loaded.assets[2].type == mvlab::MediaAssetType::video);
+    CHECK(loaded.assets[2].display_name == "Background Loop");
+    CHECK(loaded.assets[2].relative_path == "media/videos/loop.mov");
+    CHECK(loaded.assets[2].file_size == 314572800);
+
+    fs::remove_all(temp_dir);
+}

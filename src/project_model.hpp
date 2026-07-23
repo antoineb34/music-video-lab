@@ -2,8 +2,10 @@
 #define MVLAB_PROJECT_MODEL_HPP
 
 #include "result.hpp"
+#include "media_asset.hpp"
 #include <string>
 #include <optional>
+#include <vector>
 #include <filesystem>
 #include <nlohmann/json.hpp>
 
@@ -61,6 +63,7 @@ struct Project {
     Background background;
     Lyrics lyrics;
     ExportSettings export_settings;
+    std::vector<MediaAsset> assets;
 };
 
 inline void to_json(nlohmann::json& j, const Audio& audio)
@@ -134,7 +137,8 @@ inline void to_json(nlohmann::json& j, const Project& proj)
         {"audio", proj.audio},
         {"background", proj.background},
         {"lyrics", proj.lyrics},
-        {"export_settings", proj.export_settings}
+        {"export_settings", proj.export_settings},
+        {"assets", proj.assets}
     };
 }
 
@@ -155,6 +159,9 @@ inline void from_json(const nlohmann::json& j, Project& proj)
     }
     if (j.contains("export_settings")) {
         proj.export_settings = j["export_settings"].get<ExportSettings>();
+    }
+    if (j.contains("assets")) {
+        proj.assets = j["assets"].get<std::vector<MediaAsset>>();
     }
 }
 
