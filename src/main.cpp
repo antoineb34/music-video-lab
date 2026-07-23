@@ -1,16 +1,89 @@
 #include "audio_inspector.hpp"
 #include "audio_analyzer.hpp"
 #include "project_model.hpp"
+#include "error.hpp"
+#include "result.hpp"
+#include "logger.hpp"
 #include <CLI/CLI.hpp>
 #include <iostream>
 #include <string>
 #include <iomanip>
 #include <filesystem>
 
+namespace {
+
+// Determines the logger's minimum level from the raw command-line
+// arguments, before CLI11 parses anything. This must happen up front
+// (rather than in a CLI11 callback) so that debug/info logging emitted
+// from inside a subcommand's own callback - which CLI11 invokes as part
+// of parsing - already reflects the requested verbosity. Mutual
+// exclusivity between --verbose/--debug/--quiet is still enforced by
+// CLI11 below; if the flags conflict, CLI11 rejects the parse before any
+// subcommand callback (and therefore any logging) runs, so the exact
+// level picked here in a conflicting case is never observed.
+mvlab::LogLevel initial_log_level(int argc, char** argv)
+{
+    mvlab::LogLevel level = mvlab::LogLevel::warning;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--quiet") {
+            level = mvlab::LogLevel::error;
+        } else if (arg == "--verbose") {
+            level = mvlab::LogLevel::info;
+        } else if (arg == "--debug") {
+            level = mvlab::LogLevel::debug;
+        }
+    }
+    return level;
+}
+
+// Prints "Error: <message>" to stderr, and "Details: <details>" as well
+// when the configured log level is verbose enough (--verbose or
+// --debug) and details are available. This is the only place a failed
+// Result is reported to the user, so it never duplicates the logger's
+// own (separate, debug-level) diagnostic lines.
+void report_error(const mvlab::Error& err)
+{
+    std::cerr << "Error: " << err.message << "\n";
+
+    bool verbose_or_debug = static_cast<int>(mvlab::Logger::instance().min_level())
+        >= static_cast<int>(mvlab::LogLevel::info);
+    if (verbose_or_debug && err.details.has_value()) {
+        std::cerr << "Details: " << err.details.value() << "\n";
+    }
+}
+
+// Reports the error (if any) and exits with the stable code for its
+// ErrorCode; otherwise returns the unwrapped value. Centralizes the
+// report+exit sequence so every command follows the same contract.
+template <typename T>
+T unwrap_or_exit(mvlab::Result<T> result)
+{
+    if (!result) {
+        report_error(result.error());
+        std::exit(mvlab::exit_code_for(result.error().code));
+    }
+    return std::move(result).value();
+}
+
+} // namespace
+
 int main(int argc, char** argv)
 {
+    mvlab::Logger::instance().set_min_level(initial_log_level(argc, argv));
+
     CLI::App app{"MusicVideoLab", "Create music videos from audio, lyrics, and visuals."};
     app.set_version_flag("-v,--version", "MusicVideoLab 0.1.0");
+
+    bool verbose_flag = false;
+    bool debug_flag = false;
+    bool quiet_flag = false;
+    auto* verbose_opt = app.add_flag("--verbose", verbose_flag, "Show info-level logs and error details")->group("Logging");
+    auto* debug_opt = app.add_flag("--debug", debug_flag, "Show debug-level logs and error details")->group("Logging");
+    auto* quiet_opt = app.add_flag("--quiet", quiet_flag, "Suppress warning/info/debug logs")->group("Logging");
+    verbose_opt->excludes(debug_opt);
+    verbose_opt->excludes(quiet_opt);
+    debug_opt->excludes(quiet_opt);
 
     auto* audio_cmd = app.add_subcommand("audio", "Audio-related commands");
     auto* inspect_cmd = audio_cmd->add_subcommand("inspect", "Inspect audio file properties");
@@ -19,14 +92,7 @@ int main(int argc, char** argv)
     inspect_cmd->add_option("file", audio_file, "Path to audio file")->required();
 
     inspect_cmd->callback([&audio_file]() {
-        auto outcome = mvlab::inspect_audio(audio_file);
-
-        if (!outcome) {
-            std::cerr << "Error: " << outcome.error().message << "\n";
-            std::exit(1);
-        }
-
-        const auto& result = outcome.value();
+        auto result = unwrap_or_exit(mvlab::inspect_audio(audio_file));
 
         // Print in human-readable format
         std::cout << "File:        " << audio_file << "\n";
@@ -54,14 +120,7 @@ int main(int argc, char** argv)
     analyze_cmd->add_option("--points", envelope_points, "Waveform envelope points (default: 100)");
 
     analyze_cmd->callback([&analyze_file, &envelope_points]() {
-        auto outcome = mvlab::analyze_audio(analyze_file, envelope_points);
-
-        if (!outcome) {
-            std::cerr << "Error: " << outcome.error().message << "\n";
-            std::exit(1);
-        }
-
-        const auto& result = outcome.value();
+        auto result = unwrap_or_exit(mvlab::analyze_audio(analyze_file, envelope_points));
 
         // Print in human-readable format
         std::cout << "File:              " << analyze_file << "\n";
@@ -98,14 +157,8 @@ int main(int argc, char** argv)
     create_cmd->add_option("--name", project_name, "Project display name")->required();
 
     create_cmd->callback([&create_folder, &project_name]() {
-        auto outcome = mvlab::create_project_on_disk(create_folder, project_name);
-
-        if (!outcome) {
-            std::cerr << "Error: " << outcome.error().message << "\n";
-            std::exit(1);
-        }
-
-        std::cout << "Created project: " << outcome.value().root.string() << "\n";
+        auto paths = unwrap_or_exit(mvlab::create_project_on_disk(create_folder, project_name));
+        std::cout << "Created project: " << paths.root.string() << "\n";
     });
 
     auto* info_cmd = project_cmd->add_subcommand("info", "Display project information");
@@ -120,14 +173,7 @@ int main(int argc, char** argv)
             project_path /= "project.json";
         }
 
-        auto outcome = mvlab::load_project(project_path.string());
-
-        if (!outcome) {
-            std::cerr << "Error: " << outcome.error().message << "\n";
-            std::exit(1);
-        }
-
-        const auto& project = outcome.value();
+        auto project = unwrap_or_exit(mvlab::load_project(project_path.string()));
 
         std::cout << "Schema version: " << project.schema_version << "\n";
         std::cout << "Name:           " << project.name << "\n";
