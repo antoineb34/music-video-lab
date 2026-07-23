@@ -13,7 +13,7 @@ TEST_CASE("Project model: create_project creates default project", "[project_mod
 
     REQUIRE(outcome.has_value());
     const auto& project = outcome.value();
-    REQUIRE(project.schema_version == 1);
+    REQUIRE(project.schema_version == 2);
     REQUIRE(project.name == "Test Project");
     REQUIRE(!project.audio.path.has_value());
     REQUIRE(!project.background.path.has_value());
@@ -23,6 +23,7 @@ TEST_CASE("Project model: create_project creates default project", "[project_mod
     REQUIRE(project.export_settings.width == 1920);
     REQUIRE(project.export_settings.height == 1080);
     REQUIRE(project.export_settings.fps == 30);
+    REQUIRE(project.timeline.tracks.empty());
 }
 
 TEST_CASE("Project model: create_project rejects empty name", "[project_model]")
@@ -56,13 +57,23 @@ TEST_CASE("Project model: validate_project rejects empty name", "[project_model]
 TEST_CASE("Project model: validate_project rejects invalid schema version", "[project_model]")
 {
     auto project = mvlab::create_project("Test").value();
-    project.schema_version = 2;
+    project.schema_version = 999;
 
     auto outcome = mvlab::validate_project(project);
 
     REQUIRE_FALSE(outcome.has_value());
     CHECK(outcome.error().code == mvlab::ErrorCode::unsupported_schema);
     CHECK(outcome.error().message.find("Unsupported schema version") != std::string::npos);
+}
+
+TEST_CASE("Project model: validate_project accepts legacy schema version 1", "[project_model]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.schema_version = 1;
+
+    auto outcome = mvlab::validate_project(project);
+
+    REQUIRE(outcome.has_value());
 }
 
 TEST_CASE("Project model: validate_project rejects zero width", "[project_model]")
@@ -781,4 +792,474 @@ TEST_CASE("Project model: save_project with assets round trip preserves all fiel
     CHECK(loaded.assets[2].file_size == 314572800);
 
     fs::remove_all(temp_dir);
+}
+
+// ===== Project schema v2: timeline persistence =====
+
+TEST_CASE("Project model: newly created project has empty timeline", "[project_model][timeline_persistence]")
+{
+    auto project = mvlab::create_project("Timeline Test").value();
+    REQUIRE(project.timeline.tracks.empty());
+}
+
+TEST_CASE("Project model: save_project writes schema v2", "[project_model][timeline_persistence]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "schema_v2_write";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    auto project = mvlab::create_project("Schema V2 Test").value();
+    auto save_outcome = mvlab::save_project(project, file_path);
+    REQUIRE(save_outcome.has_value());
+
+    std::ifstream file(file_path);
+    nlohmann::json j;
+    file >> j;
+    file.close();
+
+    REQUIRE(j.contains("schema_version"));
+    CHECK(j["schema_version"] == 2);
+    REQUIRE(j.contains("timeline"));
+    CHECK(j["timeline"]["schema_version"] == 1);
+    CHECK(j["timeline"]["tracks"].is_array());
+    CHECK(j["timeline"]["tracks"].empty());
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: schema-v2 save/load round trip", "[project_model][timeline_persistence]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "schema_v2_roundtrip";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    auto project = mvlab::create_project("Round Trip V2").value();
+    auto save_outcome = mvlab::save_project(project, file_path);
+    REQUIRE(save_outcome.has_value());
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE(load_outcome.has_value());
+    CHECK(load_outcome.value().schema_version == 2);
+    CHECK(load_outcome.value().timeline.tracks.empty());
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: populated mixed timeline survives project round trip", "[project_model][timeline_persistence]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "mixed_timeline_roundtrip";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    auto project = mvlab::create_project("Mixed Timeline").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Music", "media/audio.mp3", 1000000
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-2", mvlab::MediaAssetType::video, "Clip", "media/clip.mp4", 2000000
+    });
+
+    project.timeline.tracks.push_back(mvlab::Track{
+        "track-1",
+        mvlab::TrackType::audio,
+        "Main Audio",
+        {mvlab::MediaClip{"clip-1", "asset-1", 0, 0, 5000000}},
+        {}
+    });
+    project.timeline.tracks.push_back(mvlab::Track{
+        "track-2",
+        mvlab::TrackType::video,
+        "Background",
+        {mvlab::MediaClip{"clip-2", "asset-2", 0, 0, 3000000}},
+        {}
+    });
+    project.timeline.tracks.push_back(mvlab::Track{
+        "track-3",
+        mvlab::TrackType::text,
+        "Lyrics",
+        {},
+        {
+            mvlab::TextClip{"clip-3", "Verse one", 0, 2000000},
+            mvlab::TextClip{"clip-4", "Verse two", 2000000, 2000000}
+        }
+    });
+
+    auto save_outcome = mvlab::save_project(project, file_path);
+    REQUIRE(save_outcome.has_value());
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE(load_outcome.has_value());
+    const auto& loaded = load_outcome.value();
+
+    REQUIRE(loaded.timeline.tracks.size() == 3);
+    CHECK(loaded.timeline.tracks[0].id == "track-1");
+    CHECK(loaded.timeline.tracks[0].media_clips[0].asset_id == "asset-1");
+    CHECK(loaded.timeline.tracks[1].id == "track-2");
+    CHECK(loaded.timeline.tracks[1].media_clips[0].asset_id == "asset-2");
+    REQUIRE(loaded.timeline.tracks[2].text_clips.size() == 2);
+    CHECK(loaded.timeline.tracks[2].text_clips[0].text == "Verse one");
+    CHECK(loaded.timeline.tracks[2].text_clips[1].text == "Verse two");
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: invalid timeline prevents save", "[project_model][timeline_persistence]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "invalid_timeline_save";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    auto project = mvlab::create_project("Invalid Timeline").value();
+    project.timeline.tracks.push_back(mvlab::Track{
+        "track-1",
+        mvlab::TrackType::audio,
+        "A",
+        {
+            mvlab::MediaClip{"clip-1", "asset-1", 0, 0, 1000000},
+            mvlab::MediaClip{"clip-2", "asset-2", 500000, 0, 1000000}
+        },
+        {}
+    });
+
+    auto save_outcome = mvlab::save_project(project, file_path);
+    REQUIRE_FALSE(save_outcome.has_value());
+    CHECK(save_outcome.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK_FALSE(fs::exists(file_path));
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: malformed timeline JSON prevents load", "[project_model][timeline_persistence]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "malformed_timeline_load";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    nlohmann::json j;
+    j["schema_version"] = 2;
+    j["name"] = "Malformed Timeline";
+    j["audio"] = nlohmann::json::object();
+    j["background"] = nlohmann::json::object();
+    j["lyrics"] = nlohmann::json::object();
+    j["export_settings"] = {{"width", 1920}, {"height", 1080}, {"fps", 30}};
+    j["assets"] = nlohmann::json::array();
+    j["timeline"] = {
+        {"schema_version", 1},
+        {"tracks", nlohmann::json::array({
+            nlohmann::json{
+                {"id", "track-1"},
+                {"type", "audio"},
+                {"name", "A"}
+                // missing media_clips/text_clips
+            }
+        })}
+    };
+
+    std::ofstream file(file_path);
+    file << j.dump(2);
+    file.close();
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE_FALSE(load_outcome.has_value());
+    CHECK(load_outcome.error().code == mvlab::ErrorCode::malformed_project);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: unsupported timeline schema prevents load", "[project_model][timeline_persistence]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "unsupported_timeline_schema";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    nlohmann::json j;
+    j["schema_version"] = 2;
+    j["name"] = "Bad Timeline Schema";
+    j["audio"] = nlohmann::json::object();
+    j["background"] = nlohmann::json::object();
+    j["lyrics"] = nlohmann::json::object();
+    j["export_settings"] = {{"width", 1920}, {"height", 1080}, {"fps", 30}};
+    j["assets"] = nlohmann::json::array();
+    j["timeline"] = {
+        {"schema_version", 999},
+        {"tracks", nlohmann::json::array()}
+    };
+
+    std::ofstream file(file_path);
+    file << j.dump(2);
+    file.close();
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE_FALSE(load_outcome.has_value());
+    CHECK(load_outcome.error().code == mvlab::ErrorCode::unsupported_schema);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: existing project data and assets remain unchanged by timeline addition", "[project_model][timeline_persistence]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "timeline_preserves_data";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    auto project = mvlab::create_project("Preserve Data").value();
+    project.audio.path = "/path/to/audio.mp3";
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Music", "media/audio.mp3", 1000000
+    });
+
+    auto save_outcome = mvlab::save_project(project, file_path);
+    REQUIRE(save_outcome.has_value());
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE(load_outcome.has_value());
+    const auto& loaded = load_outcome.value();
+    CHECK(loaded.audio.path == "/path/to/audio.mp3");
+    REQUIRE(loaded.assets.size() == 1);
+    CHECK(loaded.assets[0].id == "asset-1");
+    CHECK(loaded.timeline.tracks.empty());
+
+    fs::remove_all(temp_dir);
+}
+
+// ===== Schema-v1 migration =====
+
+TEST_CASE("Project model: valid schema-v1 project still loads", "[project_model][migration]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "v1_still_loads";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    nlohmann::json j;
+    j["schema_version"] = 1;
+    j["name"] = "Legacy Project";
+    j["audio"] = nlohmann::json::object();
+    j["background"] = nlohmann::json::object();
+    j["lyrics"] = nlohmann::json::object();
+    j["export_settings"] = {{"width", 1920}, {"height", 1080}, {"fps", 30}};
+    j["assets"] = nlohmann::json::array();
+    // No "timeline" field: pre-timeline schema-v1 shape.
+
+    std::ofstream file(file_path);
+    file << j.dump(2);
+    file.close();
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE(load_outcome.has_value());
+    CHECK(load_outcome.value().name == "Legacy Project");
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: migrated v1 project receives an empty valid timeline", "[project_model][migration]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "v1_migrated_timeline";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    nlohmann::json j;
+    j["schema_version"] = 1;
+    j["name"] = "Legacy Project";
+    j["audio"] = nlohmann::json::object();
+    j["background"] = nlohmann::json::object();
+    j["lyrics"] = nlohmann::json::object();
+    j["export_settings"] = {{"width", 1920}, {"height", 1080}, {"fps", 30}};
+    j["assets"] = nlohmann::json::array();
+
+    std::ofstream file(file_path);
+    file << j.dump(2);
+    file.close();
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE(load_outcome.has_value());
+    CHECK(load_outcome.value().timeline.tracks.empty());
+    CHECK(mvlab::validate_timeline(load_outcome.value().timeline).has_value());
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: saving a migrated v1 project writes schema v2", "[project_model][migration]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "v1_resave_writes_v2";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    nlohmann::json j;
+    j["schema_version"] = 1;
+    j["name"] = "Legacy Project";
+    j["audio"] = nlohmann::json::object();
+    j["background"] = nlohmann::json::object();
+    j["lyrics"] = nlohmann::json::object();
+    j["export_settings"] = {{"width", 1920}, {"height", 1080}, {"fps", 30}};
+    j["assets"] = nlohmann::json::array();
+
+    std::ofstream file(file_path);
+    file << j.dump(2);
+    file.close();
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE(load_outcome.has_value());
+
+    auto resave_outcome = mvlab::save_project(load_outcome.value(), file_path);
+    REQUIRE(resave_outcome.has_value());
+
+    std::ifstream reread(file_path);
+    nlohmann::json rewritten;
+    reread >> rewritten;
+    reread.close();
+
+    CHECK(rewritten["schema_version"] == 2);
+    REQUIRE(rewritten.contains("timeline"));
+    CHECK(rewritten["timeline"]["tracks"].empty());
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: migration preserves all old project fields and assets", "[project_model][migration]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "v1_migration_preserves_fields";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    nlohmann::json j;
+    j["schema_version"] = 1;
+    j["name"] = "Legacy With Assets";
+    j["audio"] = {{"path", "/path/to/audio.mp3"}};
+    j["background"] = {{"path", "/path/to/bg.mp4"}, {"type", "video"}};
+    j["lyrics"] = {{"path", "/path/to/lyrics.lrc"}, {"format", "lrc"}};
+    j["export_settings"] = {{"width", 1280}, {"height", 720}, {"fps", 24}};
+    j["assets"] = nlohmann::json::array();
+    j["assets"].push_back(nlohmann::json{
+        {"id", "asset-1"},
+        {"type", "audio"},
+        {"display_name", "Old Asset"},
+        {"relative_path", "media/old.mp3"},
+        {"file_size", 12345}
+    });
+
+    std::ofstream file(file_path);
+    file << j.dump(2);
+    file.close();
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE(load_outcome.has_value());
+    const auto& loaded = load_outcome.value();
+
+    CHECK(loaded.name == "Legacy With Assets");
+    CHECK(loaded.audio.path == "/path/to/audio.mp3");
+    CHECK(loaded.background.path == "/path/to/bg.mp4");
+    CHECK(loaded.background.type == "video");
+    CHECK(loaded.lyrics.path == "/path/to/lyrics.lrc");
+    CHECK(loaded.lyrics.format == "lrc");
+    CHECK(loaded.export_settings.width == 1280);
+    CHECK(loaded.export_settings.height == 720);
+    CHECK(loaded.export_settings.fps == 24);
+    REQUIRE(loaded.assets.size() == 1);
+    CHECK(loaded.assets[0].id == "asset-1");
+    CHECK(loaded.assets[0].display_name == "Old Asset");
+    CHECK(loaded.timeline.tracks.empty());
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: malformed old-schema project still fails appropriately", "[project_model][migration]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "v1_malformed_still_fails";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    nlohmann::json j;
+    j["schema_version"] = 1;
+    j["name"] = "Malformed Legacy";
+    j["audio"] = nlohmann::json::object();
+    j["background"] = nlohmann::json::object();
+    j["lyrics"] = nlohmann::json::object();
+    j["export_settings"] = {{"width", 0}, {"height", 1080}, {"fps", 30}};
+    j["assets"] = nlohmann::json::array();
+
+    std::ofstream file(file_path);
+    file << j.dump(2);
+    file.close();
+
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE_FALSE(load_outcome.has_value());
+    CHECK(load_outcome.error().code == mvlab::ErrorCode::malformed_project);
+
+    fs::remove_all(temp_dir);
+}
+
+// ===== Asset references from media clips =====
+
+TEST_CASE("Project model: valid media asset reference succeeds", "[project_model][asset_references]")
+{
+    auto project = mvlab::create_project("Valid Reference").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Music", "media/audio.mp3", 1000000
+    });
+    project.timeline.tracks.push_back(mvlab::Track{
+        "track-1",
+        mvlab::TrackType::audio,
+        "A",
+        {mvlab::MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+        {}
+    });
+
+    auto outcome = mvlab::validate_project(project);
+    REQUIRE(outcome.has_value());
+}
+
+TEST_CASE("Project model: missing media asset reference fails", "[project_model][asset_references]")
+{
+    auto project = mvlab::create_project("Missing Reference").value();
+    project.timeline.tracks.push_back(mvlab::Track{
+        "track-1",
+        mvlab::TrackType::audio,
+        "A",
+        {mvlab::MediaClip{"clip-1", "asset-does-not-exist", 0, 0, 1000000}},
+        {}
+    });
+
+    auto outcome = mvlab::validate_project(project);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK(outcome.error().message.find("unknown asset") != std::string::npos);
+}
+
+TEST_CASE("Project model: text-only timeline succeeds without assets", "[project_model][asset_references]")
+{
+    auto project = mvlab::create_project("Text Only").value();
+    project.timeline.tracks.push_back(mvlab::Track{
+        "track-1",
+        mvlab::TrackType::text,
+        "Lyrics",
+        {},
+        {mvlab::TextClip{"clip-1", "Hello", 0, 1000000}}
+    });
+
+    auto outcome = mvlab::validate_project(project);
+    REQUIRE(outcome.has_value());
 }

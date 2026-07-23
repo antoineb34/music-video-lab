@@ -12,10 +12,11 @@ namespace fs = std::filesystem;
 
 Result<void> validate_project(const Project& project)
 {
-    if (project.schema_version != 1) {
+    if (project.schema_version != 1 && project.schema_version != current_project_schema_version) {
         return Error{
             ErrorCode::unsupported_schema,
-            "Unsupported schema version: " + std::to_string(project.schema_version) + " (expected 1)",
+            "Unsupported schema version: " + std::to_string(project.schema_version) +
+                " (expected 1 or " + std::to_string(current_project_schema_version) + ")",
             std::nullopt
         };
     }
@@ -67,6 +68,28 @@ Result<void> validate_project(const Project& project)
         seen_ids.insert(asset.id);
     }
 
+    auto timeline_validation = validate_timeline(project.timeline);
+    if (!timeline_validation) {
+        return timeline_validation.error();
+    }
+
+    // Every media clip must reference an asset that actually exists in this
+    // project; text clips need no asset. This cross-checks two fields that
+    // validate_timeline() alone cannot see (it has no knowledge of
+    // project.assets), so it lives here rather than in the timeline module.
+    for (const auto& track : project.timeline.tracks) {
+        for (const auto& clip : track.media_clips) {
+            auto asset_result = find_media_asset(project, clip.asset_id);
+            if (!asset_result) {
+                return Error{
+                    ErrorCode::invalid_argument,
+                    "Media clip '" + clip.id + "' references unknown asset: " + clip.asset_id,
+                    std::nullopt
+                };
+            }
+        }
+    }
+
     return Result<void>{};
 }
 
@@ -77,13 +100,14 @@ Result<Project> create_project(const std::string& name)
     }
 
     Project project;
-    project.schema_version = 1;
+    project.schema_version = current_project_schema_version;
     project.name = name;
     project.audio = Audio{};
     project.background = Background{};
     project.lyrics = Lyrics{};
     project.export_settings = ExportSettings{1920, 1080, 30};
     project.assets = std::vector<MediaAsset>{};
+    project.timeline = Timeline{};
     return project;
 }
 
@@ -114,7 +138,10 @@ Result<void> save_project(const Project& project, const std::string& file_path)
     try {
         nlohmann::json j = project;
         serialized = j.dump(2);
-    } catch (const nlohmann::json::exception& e) {
+    } catch (const std::exception& e) {
+        // Catches both nlohmann::json::exception and the defensive
+        // std::runtime_error that Project's to_json() throws if timeline
+        // serialization ever fails despite validate_project() above.
         return Error{ErrorCode::serialization_error, "Failed to serialize project data", std::string(e.what())};
     }
 
@@ -161,6 +188,15 @@ Result<Project> load_project(const std::string& file_path)
     Project project;
     try {
         project = j.get<Project>();
+    } catch (const ProjectTimelineParseError& e) {
+        // Mirrors the schema_version special-case below: an unsupported
+        // timeline schema version is reported as such rather than
+        // collapsed into a generic malformed_project.
+        const Error& inner = e.error();
+        if (inner.code == ErrorCode::unsupported_schema) {
+            return inner;
+        }
+        return Error{ErrorCode::malformed_project, inner.message, inner.details};
     } catch (const std::exception& e) {
         return Error{ErrorCode::malformed_project, "Malformed project data: " + file_path, std::string(e.what())};
     }

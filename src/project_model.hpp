@@ -3,13 +3,22 @@
 
 #include "result.hpp"
 #include "media_asset.hpp"
+#include "timeline.hpp"
+#include "timeline_serialization.hpp"
 #include <string>
 #include <optional>
 #include <vector>
 #include <filesystem>
+#include <stdexcept>
 #include <nlohmann/json.hpp>
 
 namespace mvlab {
+
+// Current project schema version, written by to_json(Project). Schema
+// version 1 predates timelines; version 2 adds the "timeline" field.
+// validate_project() accepts both 1 (read-only, migrated in memory with an
+// empty timeline) and 2; anything else is unsupported_schema.
+inline constexpr int current_project_schema_version = 2;
 
 struct AudioAnalysisSummary {
     int sample_rate = 0;
@@ -64,6 +73,23 @@ struct Project {
     Lyrics lyrics;
     ExportSettings export_settings;
     std::vector<MediaAsset> assets;
+    Timeline timeline;
+};
+
+// Thrown by Project's from_json when the "timeline" field fails to
+// deserialize, so load_project() can distinguish an unsupported timeline
+// schema version from other malformed timeline data - mirroring how
+// load_project() already special-cases the project's own schema_version
+// mismatch rather than collapsing it into a generic malformed_project.
+class ProjectTimelineParseError : public std::runtime_error {
+public:
+    explicit ProjectTimelineParseError(Error error)
+        : std::runtime_error(error.message), error_(std::move(error)) {}
+
+    const Error& error() const { return error_; }
+
+private:
+    Error error_;
 };
 
 inline void to_json(nlohmann::json& j, const Audio& audio)
@@ -131,14 +157,25 @@ inline void from_json(const nlohmann::json& j, Lyrics& lyrics)
 
 inline void to_json(nlohmann::json& j, const Project& proj)
 {
+    // Defensive: save_project() always calls validate_project() (which
+    // validates proj.timeline) before serializing, so this should not fail
+    // in practice. If it ever does, throw rather than write a partial or
+    // silently-dropped timeline.
+    auto timeline_json = timeline_to_json(proj.timeline);
+    if (!timeline_json) {
+        throw std::runtime_error(
+            "Failed to serialize project timeline: " + timeline_json.error().message);
+    }
+
     j = nlohmann::json{
-        {"schema_version", proj.schema_version},
+        {"schema_version", current_project_schema_version},
         {"name", proj.name},
         {"audio", proj.audio},
         {"background", proj.background},
         {"lyrics", proj.lyrics},
         {"export_settings", proj.export_settings},
-        {"assets", proj.assets}
+        {"assets", proj.assets},
+        {"timeline", timeline_json.value()}
     };
 }
 
@@ -162,6 +199,20 @@ inline void from_json(const nlohmann::json& j, Project& proj)
     }
     if (j.contains("assets")) {
         proj.assets = j["assets"].get<std::vector<MediaAsset>>();
+    }
+
+    if (j.contains("timeline")) {
+        auto timeline_result = timeline_from_json(j["timeline"]);
+        if (!timeline_result) {
+            throw ProjectTimelineParseError(timeline_result.error());
+        }
+        proj.timeline = timeline_result.value();
+    } else {
+        // Schema-v1 projects predate timelines: migrate in memory to an
+        // empty, valid timeline. The literal schema_version value is still
+        // checked by validate_project(), so an unsupported version is not
+        // silently accepted just because "timeline" happens to be absent.
+        proj.timeline = Timeline{};
     }
 }
 
