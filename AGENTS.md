@@ -75,6 +75,49 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+## Git workflow
+
+**Branch strategy:**
+- `main` is protected and should remain stable; do not work directly on it.
+- Start each task from an updated `main`.
+- Create a focused feature branch with a clear name: `feature/audio-analysis`, `fix/ffprobe-error`, `test/audio-inspector`, etc.
+
+**Commit and review:**
+- Make only changes related to the current task.
+- Run the canonical configure, build, and test commands before pushing.
+- Push the feature branch to GitHub and open a pull request into `main`.
+- CI must pass before merging.
+- No approval is required (solo project); use squash merge when CI passes.
+- Delete the remote feature branch after merge.
+- Return to `main` locally and pull the merged changes.
+
+**Absolute rules:**
+- Never force-push or delete `main`.
+- Do not bypass branch protection.
+
+**Canonical workflow:**
+```
+git switch main
+git pull
+git switch -c feature/example-task
+
+# make changes
+
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+
+git add <relevant-files>
+git commit -m "feat: describe the change"
+git push -u origin feature/example-task
+gh pr create --fill
+
+# after CI passes
+gh pr merge --squash --delete-branch
+git switch main
+git pull
+```
+
 ## Testing rules
 
 - **Temporary test media:** Generated on-the-fly with ffmpeg in `/tmp`; auto-cleaned up after each test

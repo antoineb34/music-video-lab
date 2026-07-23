@@ -5,6 +5,7 @@
 - Source and test file responsibilities
 - External tool requirements (ffmpeg, ffprobe)
 - Canonical build and test commands
+- Git workflow (branch strategy, commit, review, merge)
 - Testing rules and POSIX status
 
 **General rules:**
