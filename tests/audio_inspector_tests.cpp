@@ -51,9 +51,10 @@ TEST_CASE("mvlab::inspect_audio with valid WAV succeeds", "[inspector]")
     REQUIRE(!temp_file.empty());
     REQUIRE(fs::exists(temp_file));
 
-    auto [result, error] = mvlab::inspect_audio(temp_file);
+    auto outcome = mvlab::inspect_audio(temp_file);
 
-    CHECK(error.empty());
+    REQUIRE(outcome.has_value());
+    const auto& result = outcome.value();
     CHECK(!result.codec.empty());
     CHECK(!result.sample_rate.empty());
     CHECK(!result.channels.empty());
@@ -67,9 +68,10 @@ TEST_CASE("mvlab::inspect_audio contains all required fields", "[inspector]")
     std::string temp_file = create_temp_wav(0.5);
     REQUIRE(!temp_file.empty());
 
-    auto [result, error] = mvlab::inspect_audio(temp_file);
+    auto outcome = mvlab::inspect_audio(temp_file);
 
-    REQUIRE(error.empty());
+    REQUIRE(outcome.has_value());
+    const auto& result = outcome.value();
 
     // Check all 6 fields are populated
     CHECK_FALSE(result.codec.empty());
@@ -85,27 +87,28 @@ TEST_CASE("mvlab::inspect_audio contains all required fields", "[inspector]")
 
 TEST_CASE("mvlab::inspect_audio nonexistent file returns error", "[inspector]")
 {
-    auto [result, error] = mvlab::inspect_audio("/tmp/mvlab_nonexistent_12345_xyz.wav");
+    auto outcome = mvlab::inspect_audio("/tmp/mvlab_nonexistent_12345_xyz.wav");
 
-    CHECK_FALSE(error.empty());
-    bool has_error_msg = (error.find("not found") != std::string::npos ||
-                          error.find("File not found") != std::string::npos);
-    CHECK(has_error_msg);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::file_not_found);
+    CHECK(outcome.error().message.find("not found") != std::string::npos);
 }
 
-TEST_CASE("mvlab::inspect_audio invalid file returns ffprobe error", "[inspector]")
+TEST_CASE("mvlab::inspect_audio invalid file returns typed invalid_media error", "[inspector]")
 {
     std::string temp_file = "/tmp/mvlab_test_invalid.txt";
     FILE* f = std::fopen(temp_file.c_str(), "w");
     std::fprintf(f, "This is not an audio file\n");
     std::fclose(f);
 
-    auto [result, error] = mvlab::inspect_audio(temp_file);
+    auto outcome = mvlab::inspect_audio(temp_file);
 
-    CHECK_FALSE(error.empty());
-    bool has_error = (error.find("Error") != std::string::npos ||
-                      error.find("Invalid") != std::string::npos);
-    CHECK(has_error);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_media);
+    CHECK(outcome.error().message.find("Invalid") != std::string::npos);
+    // ffprobe's stderr diagnostics must be preserved, not discarded.
+    REQUIRE(outcome.error().details.has_value());
+    CHECK_FALSE(outcome.error().details.value().empty());
 
     cleanup_temp_file(temp_file);
 }
@@ -122,11 +125,34 @@ TEST_CASE("mvlab::inspect_audio path with spaces succeeds", "[inspector]")
     REQUIRE(ret == 0);
     REQUIRE(fs::exists(spaced_file));
 
-    auto [result, error] = mvlab::inspect_audio(spaced_file);
+    auto outcome = mvlab::inspect_audio(spaced_file);
 
-    CHECK(error.empty());
-    CHECK(!result.codec.empty());
+    REQUIRE(outcome.has_value());
+    CHECK(!outcome.value().codec.empty());
 
     cleanup_temp_file(base_file);
     cleanup_temp_file(spaced_file);
+}
+
+TEST_CASE("mvlab::inspect_audio reports external_tool_unavailable when ffprobe is missing", "[inspector]")
+{
+    std::string temp_file = create_temp_wav(0.5);
+    REQUIRE(!temp_file.empty());
+
+    std::string empty_path_dir = "/tmp/mvlab_empty_path_inspect";
+    fs::create_directories(empty_path_dir);
+
+    const char* original_path = std::getenv("PATH");
+    std::string saved_path = original_path ? original_path : "";
+    setenv("PATH", empty_path_dir.c_str(), 1);
+
+    auto outcome = mvlab::inspect_audio(temp_file);
+
+    setenv("PATH", saved_path.c_str(), 1);
+
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::external_tool_unavailable);
+
+    cleanup_temp_file(temp_file);
+    fs::remove_all(empty_path_dir);
 }

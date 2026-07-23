@@ -1,8 +1,10 @@
 #ifndef MVLAB_PROJECT_MODEL_HPP
 #define MVLAB_PROJECT_MODEL_HPP
 
+#include "result.hpp"
 #include <string>
 #include <optional>
+#include <filesystem>
 #include <nlohmann/json.hpp>
 
 namespace mvlab {
@@ -156,20 +158,35 @@ inline void from_json(const nlohmann::json& j, Project& proj)
     }
 }
 
-// Validate a project structure
-// Returns pair<true, ""> if valid, or <false, error_message> if invalid
-std::pair<bool, std::string> validate_project(const Project& project);
+// Validates a Project supplied directly by a caller (in-memory). Field
+// problems are reported as invalid_argument; an unrecognized schema
+// version is always reported as unsupported_schema regardless of caller
+// context. load_project() remaps invalid_argument to malformed_project
+// when the same checks fail against data read from a file, since in that
+// case the bad data originated externally rather than from a direct call.
+Result<void> validate_project(const Project& project);
 
-// Create a new project with default values
-Project create_project(const std::string& name);
+// Create a new project with default values. Fails with invalid_argument
+// if name is empty.
+Result<Project> create_project(const std::string& name);
 
-// Save project to JSON file
-// Returns <true, ""> on success, or <false, error_message> on failure
-std::pair<bool, std::string> save_project(const Project& project, const std::string& file_path);
+// Save project to JSON file. Validates first (see validate_project).
+Result<void> save_project(const Project& project, const std::string& file_path);
 
-// Load project from JSON file
-// Returns <project, ""> on success, or <empty_project, error_message> on failure
-std::pair<Project, std::string> load_project(const std::string& file_path);
+// Load project from JSON file.
+Result<Project> load_project(const std::string& file_path);
+
+// Paths that make up an initialized project folder on disk.
+struct ProjectPaths {
+    std::filesystem::path root;          // the <name>.mvlab folder
+    std::filesystem::path project_file;  // root / "project.json"
+};
+
+// Creates the full <name>.mvlab folder structure (media/, lyrics/,
+// analysis/, renders/, project.json) at `folder`, appending the .mvlab
+// suffix if `folder` doesn't already end with it. Refuses to overwrite an
+// existing non-empty project folder.
+Result<ProjectPaths> create_project_on_disk(const std::filesystem::path& folder, const std::string& name);
 
 } // namespace mvlab
 
