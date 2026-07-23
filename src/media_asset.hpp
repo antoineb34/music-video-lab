@@ -116,6 +116,19 @@ Result<MediaAssetDestination> plan_media_asset_destination(
     const std::filesystem::path& source_path
 );
 
+// Imports an external media file into an existing project with transaction safety.
+// On success: file is copied, asset is appended, and project.json is saved.
+// On failure: Project is unchanged, no partial files remain, and original project.json is valid.
+// Returns invalid_argument for empty paths, unsupported formats, or invalid projects.
+// Returns file_not_found for missing source or project root.
+// Returns filesystem_error for copy or save failures.
+// Returns malformed_project if the existing project is invalid.
+Result<MediaAsset> import_media_asset(
+    Project& project,
+    const std::filesystem::path& project_root,
+    const std::filesystem::path& source_path
+);
+
 } // namespace mvlab
 
 #endif // MVLAB_MEDIA_ASSET_HPP

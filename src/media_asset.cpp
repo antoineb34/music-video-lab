@@ -421,4 +421,198 @@ Result<MediaAssetDestination> plan_media_asset_destination(
     };
 }
 
+Result<MediaAsset> import_media_asset(
+    Project& project,
+    const std::filesystem::path& project_root,
+    const std::filesystem::path& source_path
+)
+{
+    // Step 1: Validate inputs
+    if (project_root.empty()) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Project root path cannot be empty",
+            std::nullopt
+        };
+    }
+
+    if (source_path.empty()) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Source path cannot be empty",
+            std::nullopt
+        };
+    }
+
+    // Step 2: Validate project root exists and is a directory
+    std::error_code ec;
+    if (!std::filesystem::exists(project_root, ec)) {
+        if (ec) {
+            return Error{
+                ErrorCode::filesystem_error,
+                "Failed to check if project root exists: " + project_root.string(),
+                ec.message()
+            };
+        }
+        return Error{
+            ErrorCode::file_not_found,
+            "Project root not found: " + project_root.string(),
+            std::nullopt
+        };
+    }
+
+    if (!std::filesystem::is_directory(project_root, ec)) {
+        if (ec) {
+            return Error{
+                ErrorCode::filesystem_error,
+                "Failed to check if project root is a directory: " + project_root.string(),
+                ec.message()
+            };
+        }
+        return Error{
+            ErrorCode::invalid_argument,
+            "Project root is not a directory: " + project_root.string(),
+            std::nullopt
+        };
+    }
+
+    // Step 3: Validate the existing project
+    auto project_validation = validate_project(project);
+    if (!project_validation) {
+        return Error{
+            ErrorCode::malformed_project,
+            project_validation.error().message,
+            project_validation.error().details
+        };
+    }
+
+    // Step 4: Detect media type
+    auto type_result = detect_media_asset_type(source_path);
+    if (!type_result) {
+        return type_result.error();
+    }
+    MediaAssetType media_type = type_result.value();
+
+    // Step 5: Plan destination
+    auto dest_result = plan_media_asset_destination(project_root, source_path);
+    if (!dest_result) {
+        return dest_result.error();
+    }
+    MediaAssetDestination destination = dest_result.value();
+
+    // Step 6: Create media directory if needed
+    auto media_dir = project_root / "media";
+    try {
+        if (!std::filesystem::exists(media_dir)) {
+            std::filesystem::create_directory(media_dir);
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        return Error{
+            ErrorCode::filesystem_error,
+            "Failed to create media directory: " + media_dir.string(),
+            e.what()
+        };
+    }
+
+    // Step 7: Save original project state for rollback
+    Project original_project = project;
+
+    // Step 8: Copy source file to destination
+    bool file_copied = false;
+    try {
+        std::filesystem::copy_file(
+            source_path,
+            destination.absolute_path,
+            std::filesystem::copy_options::skip_existing
+        );
+        file_copied = true;
+    } catch (const std::filesystem::filesystem_error& e) {
+        return Error{
+            ErrorCode::filesystem_error,
+            "Failed to copy media file: " + source_path.string(),
+            e.what()
+        };
+    }
+
+    // Step 9: Get file size
+    std::uintmax_t file_size = 0;
+    try {
+        file_size = std::filesystem::file_size(destination.absolute_path);
+    } catch (const std::filesystem::filesystem_error& e) {
+        if (file_copied) {
+            try {
+                std::filesystem::remove(destination.absolute_path);
+            } catch (...) {
+                // Ignore rollback errors
+            }
+        }
+        return Error{
+            ErrorCode::filesystem_error,
+            "Failed to get size of copied file: " + destination.absolute_path.string(),
+            e.what()
+        };
+    }
+
+    // Step 10: Generate asset ID
+    AssetId asset_id = generate_asset_id(project);
+
+    // Step 11: Get display name from source filename (with original extension)
+    std::string display_name = source_path.filename().string();
+
+    // Step 12: Create MediaAsset
+    MediaAsset imported_asset{
+        asset_id,
+        media_type,
+        display_name,
+        destination.relative_path,
+        file_size
+    };
+
+    // Step 13: Append to project
+    project.assets.push_back(imported_asset);
+
+    // Step 14: Validate updated project
+    auto updated_validation = validate_project(project);
+    if (!updated_validation) {
+        // Rollback: restore project and remove file
+        project = original_project;
+        if (file_copied) {
+            try {
+                std::filesystem::remove(destination.absolute_path);
+            } catch (...) {
+                // Ignore rollback errors, but preserve original error
+            }
+        }
+        return Error{
+            ErrorCode::invalid_argument,
+            updated_validation.error().message,
+            updated_validation.error().details
+        };
+    }
+
+    // Step 15: Save updated project
+    auto project_file = project_root / "project.json";
+    auto save_result = save_project(project, project_file.string());
+    if (!save_result) {
+        // Rollback: restore project and remove file
+        project = original_project;
+        if (file_copied) {
+            try {
+                std::filesystem::remove(destination.absolute_path);
+            } catch (const std::filesystem::filesystem_error& rollback_err) {
+                std::string rollback_msg = std::string(rollback_err.what());
+                return Error{
+                    save_result.error().code,
+                    save_result.error().message,
+                    save_result.error().details.value_or("") + "; rollback removal failed: " + rollback_msg
+                };
+            }
+        }
+        return save_result.error();
+    }
+
+    // Success: return the imported asset
+    return imported_asset;
+}
+
 } // namespace mvlab

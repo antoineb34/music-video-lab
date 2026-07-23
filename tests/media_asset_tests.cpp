@@ -958,3 +958,448 @@ TEST_CASE("Media asset destination: empty source path", "[media_asset]")
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
 }
+
+// Media asset import: successful imports
+TEST_CASE("Media asset import: successful audio import", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_1";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+
+    REQUIRE(result.has_value());
+    auto imported = result.value();
+    CHECK(imported.type == mvlab::MediaAssetType::audio);
+    CHECK(!imported.id.empty());
+    CHECK(imported.display_name.find(".mp3") != std::string::npos);
+    CHECK(imported.relative_path.string().find("media/") == 0);
+    CHECK(imported.file_size > 0);
+}
+
+TEST_CASE("Media asset import: successful image import", "[media_asset]")
+{
+    auto source = create_temp_file(".png");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_2";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value().type == mvlab::MediaAssetType::image);
+}
+
+TEST_CASE("Media asset import: successful video import", "[media_asset]")
+{
+    auto source = create_temp_file(".mp4");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_3";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value().type == mvlab::MediaAssetType::video);
+}
+
+TEST_CASE("Media asset import: copied file exists in media directory", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_4";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    REQUIRE(result.has_value());
+    auto imported = result.value();
+
+    auto expected_path = project_root / imported.relative_path;
+    CHECK(std::filesystem::exists(expected_path));
+    CHECK(std::filesystem::is_regular_file(expected_path));
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset import: copied bytes match source bytes", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto source_size = std::filesystem::file_size(source);
+
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_5";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    REQUIRE(result.has_value());
+    auto imported = result.value();
+    CHECK(imported.file_size == source_size);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset import: asset appended to project", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_6";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    size_t original_count = project.assets.size();
+
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    REQUIRE(result.has_value());
+    CHECK(project.assets.size() == original_count + 1);
+    CHECK(project.assets.back().id == result.value().id);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset import: project.json saved with new asset", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_7";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    REQUIRE(result.has_value());
+    auto imported_id = result.value().id;
+
+    auto project_file = project_root / "project.json";
+    REQUIRE(std::filesystem::exists(project_file));
+
+    auto loaded = mvlab::load_project(project_file.string());
+    REQUIRE(loaded.has_value());
+    CHECK(loaded.value().assets.size() == 1);
+    CHECK(loaded.value().assets[0].id == imported_id);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset import: uppercase extension normalized to lowercase", "[media_asset]")
+{
+    auto source = create_temp_file(".MP3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_8";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    REQUIRE(result.has_value());
+    auto imported = result.value();
+
+    // Check that the managed path has lowercase extension
+    CHECK(imported.relative_path.string().find(".mp3") != std::string::npos);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset import: filename sanitization respected", "[media_asset]")
+{
+    auto temp_dir = std::filesystem::temp_directory_path();
+    auto source_path = temp_dir / "my  song!!!file.mp3";
+    std::ofstream file(source_path);
+    file << "test";
+    file.close();
+
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_9";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, source_path);
+
+    REQUIRE(result.has_value());
+    auto imported = result.value();
+
+    // Should have sanitized the name
+    CHECK(imported.relative_path.string().find("my-song-file") != std::string::npos);
+
+    std::filesystem::remove(source_path);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset import: destination collision produces -2", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_10";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    // Create existing file with the preferred name
+    auto stem = std::filesystem::path(source).stem().string();
+    auto existing = project_root / "media" / (stem + ".mp3");
+    std::ofstream f(existing);
+    f << "existing";
+    f.close();
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    REQUIRE(result.has_value());
+    auto imported = result.value();
+
+    // Should have -2 suffix
+    CHECK(imported.relative_path.string().find("-2.mp3") != std::string::npos);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset import: second import receives next asset ID", "[media_asset]")
+{
+    auto source1 = create_temp_file(".mp3");
+    auto source2 = create_temp_file(".png");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_11";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+
+    auto result1 = mvlab::import_media_asset(project, project_root, source1);
+    REQUIRE(result1.has_value());
+    auto id1 = result1.value().id;
+
+    auto result2 = mvlab::import_media_asset(project, project_root, source2);
+    REQUIRE(result2.has_value());
+    auto id2 = result2.value().id;
+
+    CHECK(id1 != id2);
+    CHECK(project.assets.size() == 2);
+
+    std::filesystem::remove(source1);
+    std::filesystem::remove(source2);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset import: creates missing media directory", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_12";
+    std::filesystem::create_directory(project_root);
+    // Do NOT create media/ directory
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    REQUIRE(result.has_value());
+    CHECK(std::filesystem::exists(project_root / "media"));
+    CHECK(std::filesystem::is_directory(project_root / "media"));
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+// Media asset import: failure and rollback
+TEST_CASE("Media asset import: empty project root rejected", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project = mvlab::create_project("Test").value();
+
+    auto result = mvlab::import_media_asset(project, "", source);
+    std::filesystem::remove(source);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
+}
+
+TEST_CASE("Media asset import: missing project root rejected", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project = mvlab::create_project("Test").value();
+    auto nonexistent = std::filesystem::temp_directory_path() / "mvlab_nonexistent_proj";
+
+    auto result = mvlab::import_media_asset(project, nonexistent, source);
+    std::filesystem::remove(source);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::file_not_found);
+}
+
+TEST_CASE("Media asset import: project root as regular file rejected", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_file = std::filesystem::temp_directory_path() / "mvlab_not_a_dir";
+    std::ofstream f(project_file);
+    f << "not a directory";
+    f.close();
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_file, source);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove(project_file);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
+}
+
+TEST_CASE("Media asset import: empty source path rejected", "[media_asset]")
+{
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_13";
+    std::filesystem::create_directory(project_root);
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, "");
+
+    std::filesystem::remove_all(project_root);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
+}
+
+TEST_CASE("Media asset import: missing source rejected", "[media_asset]")
+{
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_14";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto nonexistent = std::filesystem::temp_directory_path() / "mvlab_nonexistent.mp3";
+
+    auto result = mvlab::import_media_asset(project, project_root, nonexistent);
+
+    std::filesystem::remove_all(project_root);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::file_not_found);
+}
+
+TEST_CASE("Media asset import: source as directory rejected", "[media_asset]")
+{
+    auto source_dir = std::filesystem::temp_directory_path() / "mvlab_source_dir";
+    std::filesystem::create_directory(source_dir);
+
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_15";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, source_dir);
+
+    std::filesystem::remove_all(source_dir);
+    std::filesystem::remove_all(project_root);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
+}
+
+TEST_CASE("Media asset import: unsupported extension rejected", "[media_asset]")
+{
+    auto source = create_temp_file(".txt");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_16";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::unsupported_format);
+}
+
+TEST_CASE("Media asset import: rollback removes copied file on save failure", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_17";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    // Create an invalid project (mismatched export settings)
+    auto project = mvlab::create_project("Test").value();
+    project.export_settings.width = 0;  // Invalid
+
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    // Should fail on validation
+    REQUIRE_FALSE(result.has_value());
+
+    // File should be removed
+    auto media_dir = project_root / "media";
+    bool media_empty = true;
+    if (std::filesystem::exists(media_dir)) {
+        for (const auto& entry : std::filesystem::directory_iterator(media_dir)) {
+            if (std::filesystem::is_regular_file(entry)) {
+                media_empty = false;
+                break;
+            }
+        }
+    }
+    CHECK(media_empty);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset import: rollback restores project state on failure", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_18";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    size_t original_asset_count = project.assets.size();
+
+    // Create an invalid project for rollback
+    project.export_settings.width = 0;
+
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    REQUIRE_FALSE(result.has_value());
+    // Asset count should not change
+    CHECK(project.assets.size() == original_asset_count);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset import: no asset remains after rollback", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_import_19";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    project.export_settings.width = 0;  // Make it invalid
+
+    auto result = mvlab::import_media_asset(project, project_root, source);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(project.assets.empty());
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
