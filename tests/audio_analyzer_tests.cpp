@@ -173,6 +173,9 @@ TEST_CASE("mvlab::analyze_audio invalid file returns typed invalid_media error",
 
     REQUIRE_FALSE(outcome.has_value());
     CHECK(outcome.error().code == mvlab::ErrorCode::invalid_media);
+    // ffprobe/ffmpeg stderr diagnostics must be preserved, not discarded.
+    REQUIRE(outcome.error().details.has_value());
+    CHECK_FALSE(outcome.error().details.value().empty());
 
     cleanup_temp_file(temp_file);
 }

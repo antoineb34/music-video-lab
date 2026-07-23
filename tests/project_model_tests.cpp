@@ -2,6 +2,8 @@
 #include "project_model.hpp"
 #include <filesystem>
 #include <fstream>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
@@ -370,4 +372,76 @@ TEST_CASE("Project model: create_project_on_disk accepts a path already ending i
     CHECK(outcome.value().root == temp_dir / "explicit.mvlab");
 
     fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: load_project reports permission_denied for an unreadable file", "[project_model]")
+{
+    if (getuid() == 0) {
+        return; // root bypasses POSIX permission checks; skip under CI running as root.
+    }
+
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "unreadable";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+    auto project = mvlab::create_project("Unreadable").value();
+    REQUIRE(mvlab::save_project(project, file_path).has_value());
+
+    chmod(file_path.c_str(), 0);
+
+    auto outcome = mvlab::load_project(file_path);
+
+    chmod(file_path.c_str(), 0644);
+
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::permission_denied);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: save_project reports permission_denied for an unwritable directory", "[project_model]")
+{
+    if (getuid() == 0) {
+        return; // root bypasses POSIX permission checks; skip under CI running as root.
+    }
+
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "unwritable";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    chmod(temp_dir.c_str(), 0500); // read + execute, no write
+
+    auto project = mvlab::create_project("Unwritable").value();
+    auto outcome = mvlab::save_project(project, (temp_dir / "project.json").string());
+
+    chmod(temp_dir.c_str(), 0700);
+
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::permission_denied);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: save_project preserves filesystem diagnostics in details when directory creation fails", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "blocked_by_file";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir.parent_path());
+
+    // Create a regular file at the path a directory needs to occupy, so
+    // create_directories() cannot proceed.
+    {
+        std::ofstream blocker(temp_dir);
+        blocker << "not a directory";
+    }
+
+    auto project = mvlab::create_project("Blocked").value();
+    auto outcome = mvlab::save_project(project, (temp_dir / "project.json").string());
+
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::filesystem_error);
+    REQUIRE(outcome.error().details.has_value());
+    CHECK_FALSE(outcome.error().details.value().empty());
+
+    fs::remove(temp_dir);
 }
