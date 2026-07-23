@@ -1,9 +1,9 @@
 #ifndef MVLAB_AUDIO_ANALYZER_HPP
 #define MVLAB_AUDIO_ANALYZER_HPP
 
+#include "result.hpp"
 #include <string>
 #include <vector>
-#include <utility>
 #include <cstdint>
 
 namespace mvlab {
@@ -18,8 +18,7 @@ struct AudioAnalysisResult {
 };
 
 // Analyze audio file using ffmpeg to decode PCM and C++ to compute metrics
-// Returns result and error message (empty string if successful)
-std::pair<AudioAnalysisResult, std::string> analyze_audio(
+Result<AudioAnalysisResult> analyze_audio(
     const std::string& file_path,
     int envelope_points = 100
 );

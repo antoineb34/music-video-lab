@@ -32,8 +32,12 @@ FetchContent_MakeAvailable(Catch2 CLI11 nlohmann_json)
 
 enable_testing()
 
+find_package(Threads REQUIRED)
+
 # Core library containing production logic (reusable across frontends)
 add_library(mvlab_core STATIC
+    src/error.cpp
+    src/logger.cpp
     src/audio_inspector.cpp
     src/audio_analyzer.cpp
     src/project_model.cpp
@@ -45,6 +49,7 @@ target_include_directories(mvlab_core PUBLIC
 
 target_link_libraries(mvlab_core PUBLIC
     nlohmann_json::nlohmann_json
+    Threads::Threads
 )
 
 target_compile_options(mvlab_core PRIVATE
@@ -72,6 +77,9 @@ target_link_libraries(mvlab PRIVATE
 add_executable(
     mvlab_tests
     tests/smoke_tests.cpp
+    tests/error_tests.cpp
+    tests/result_tests.cpp
+    tests/logger_tests.cpp
     tests/audio_inspector_tests.cpp
     tests/audio_analyzer_tests.cpp
     tests/project_model_tests.cpp
@@ -80,6 +88,7 @@ add_executable(
 target_link_libraries(mvlab_tests PRIVATE
     mvlab_core
     Catch2::Catch2WithMain
+    Threads::Threads
 )
 
 target_compile_options(mvlab_tests PRIVATE

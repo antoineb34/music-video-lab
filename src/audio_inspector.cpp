@@ -1,4 +1,5 @@
 #include "audio_inspector.hpp"
+#include "logger.hpp"
 #include <filesystem>
 #include <unistd.h>
 #include <sys/types.h>
@@ -8,14 +9,26 @@
 
 namespace mvlab {
 
-std::pair<AudioInspectResult, std::string> inspect_audio(const std::string& file_path)
+namespace {
+
+// Exit codes used by the forked child to signal setup problems distinct
+// from execvp() itself failing (127 is the standard shell convention for
+// "command not found", which we rely on to detect a missing ffprobe).
+constexpr int kChildSetupFailureExitCode = 126;
+constexpr int kExecFailedExitCode = 127;
+
+} // namespace
+
+Result<AudioInspectResult> inspect_audio(const std::string& file_path)
 {
     AudioInspectResult result{};
-    std::string error_output;
 
-    // Check if file exists
     if (!std::filesystem::exists(file_path)) {
-        return {result, "File not found: " + file_path};
+        return Error{ErrorCode::file_not_found, "Audio file not found: " + file_path, std::nullopt};
+    }
+
+    if (access(file_path.c_str(), R_OK) != 0) {
+        return Error{ErrorCode::permission_denied, "Audio file is not readable: " + file_path, std::nullopt};
     }
 
     // Create pipes for stdout and stderr
@@ -23,13 +36,15 @@ std::pair<AudioInspectResult, std::string> inspect_audio(const std::string& file
     int stderr_pipe[2];
 
     if (pipe(stdout_pipe) == -1) {
-        return {result, "Failed to create stdout pipe"};
+        return Error{ErrorCode::internal_error, "Failed to create stdout pipe", std::nullopt};
     }
     if (pipe(stderr_pipe) == -1) {
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
-        return {result, "Failed to create stderr pipe"};
+        return Error{ErrorCode::internal_error, "Failed to create stderr pipe", std::nullopt};
     }
+
+    Logger::instance().debug("Launching ffprobe for " + file_path);
 
     pid_t pid = fork();
     if (pid == -1) {
@@ -37,7 +52,7 @@ std::pair<AudioInspectResult, std::string> inspect_audio(const std::string& file
         close(stdout_pipe[1]);
         close(stderr_pipe[0]);
         close(stderr_pipe[1]);
-        return {result, "Failed to fork process"};
+        return Error{ErrorCode::internal_error, "Failed to fork process", std::nullopt};
     }
 
     if (pid == 0) {
@@ -47,11 +62,11 @@ std::pair<AudioInspectResult, std::string> inspect_audio(const std::string& file
 
         // Redirect stdout to pipe
         if (dup2(stdout_pipe[1], STDOUT_FILENO) == -1) {
-            _exit(127);
+            _exit(kChildSetupFailureExitCode);
         }
         // Redirect stderr to pipe
         if (dup2(stderr_pipe[1], STDERR_FILENO) == -1) {
-            _exit(127);
+            _exit(kChildSetupFailureExitCode);
         }
 
         close(stdout_pipe[1]);
@@ -70,7 +85,7 @@ std::pair<AudioInspectResult, std::string> inspect_audio(const std::string& file
         };
 
         execvp("ffprobe", (char* const*)argv);
-        _exit(127);
+        _exit(kExecFailedExitCode);
     }
 
     // Parent process
@@ -87,6 +102,7 @@ std::pair<AudioInspectResult, std::string> inspect_audio(const std::string& file
     close(stdout_pipe[0]);
 
     // Read stderr
+    std::string error_output;
     while ((bytes_read = read(stderr_pipe[0], buffer, sizeof(buffer))) > 0) {
         error_output.append(buffer, bytes_read);
     }
@@ -95,19 +111,32 @@ std::pair<AudioInspectResult, std::string> inspect_audio(const std::string& file
     // Wait for child
     int status;
     if (waitpid(pid, &status, 0) == -1) {
-        return {result, "Failed to wait for ffprobe process"};
+        return Error{ErrorCode::internal_error, "Failed to wait for ffprobe process", std::nullopt};
     }
 
     if (!WIFEXITED(status)) {
-        return {result, "ffprobe terminated abnormally"};
+        return Error{ErrorCode::internal_error, "ffprobe terminated abnormally", std::nullopt};
     }
 
     int exit_code = WEXITSTATUS(status);
+    if (exit_code == kExecFailedExitCode) {
+        Logger::instance().debug("ffprobe not found on PATH");
+        return Error{
+            ErrorCode::external_tool_unavailable,
+            "ffprobe is not installed or not on PATH",
+            std::nullopt
+        };
+    }
+    if (exit_code == kChildSetupFailureExitCode) {
+        return Error{ErrorCode::internal_error, "Failed to prepare ffprobe process", std::nullopt};
+    }
     if (exit_code != 0) {
-        if (error_output.empty()) {
-            return {result, "ffprobe failed with exit code " + std::to_string(exit_code)};
-        }
-        return {result, error_output};
+        Logger::instance().debug("ffprobe exited with code " + std::to_string(exit_code) + " for " + file_path);
+        return Error{
+            ErrorCode::invalid_media,
+            "Invalid or unreadable audio file: " + file_path,
+            error_output.empty() ? std::nullopt : std::optional<std::string>(error_output)
+        };
     }
 
     // Parse stdout
@@ -158,7 +187,15 @@ std::pair<AudioInspectResult, std::string> inspect_audio(const std::string& file
         }
     }
 
-    return {result, ""};
+    if (result.codec.empty() && result.sample_rate.empty() && result.channels.empty()) {
+        return Error{
+            ErrorCode::malformed_external_output,
+            "ffprobe did not report an audio stream for: " + file_path,
+            stdout_data.empty() ? std::nullopt : std::optional<std::string>(stdout_data)
+        };
+    }
+
+    return result;
 }
 
 } // namespace mvlab
