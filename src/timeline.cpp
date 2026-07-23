@@ -518,4 +518,296 @@ Result<const TextClip*> find_text_clip(const Timeline& timeline, const ClipId& i
     };
 }
 
+Result<void> add_track(Timeline& timeline, Track track)
+{
+    auto validation = validate_track(track);
+    if (!validation) {
+        return validation;
+    }
+
+    for (const auto& existing_track : timeline.tracks) {
+        if (existing_track.id == track.id) {
+            return Error{
+                ErrorCode::invalid_argument,
+                "Duplicate track ID: " + track.id,
+                std::nullopt
+            };
+        }
+    }
+
+    Timeline candidate = timeline;
+    candidate.tracks.push_back(track);
+
+    auto timeline_validation = validate_timeline(candidate);
+    if (!timeline_validation) {
+        return timeline_validation;
+    }
+
+    timeline = candidate;
+    return Result<void>{};
+}
+
+Result<void> remove_track(Timeline& timeline, const TrackId& track_id)
+{
+    auto track_result = find_track(timeline, track_id);
+    if (!track_result) {
+        return track_result.error();
+    }
+
+    Timeline candidate = timeline;
+
+    auto it = candidate.tracks.begin();
+    while (it != candidate.tracks.end()) {
+        if (it->id == track_id) {
+            it = candidate.tracks.erase(it);
+            break;
+        } else {
+            ++it;
+        }
+    }
+
+    timeline = candidate;
+    return Result<void>{};
+}
+
+Result<void> add_media_clip(
+    Timeline& timeline,
+    const TrackId& track_id,
+    MediaClip clip)
+{
+    auto track_result = find_track(timeline, track_id);
+    if (!track_result) {
+        return track_result.error();
+    }
+
+    if (track_result.value()->type == TrackType::text) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Cannot add media clip to text track: " + track_id,
+            std::nullopt
+        };
+    }
+
+    auto clip_validation = validate_media_clip(clip);
+    if (!clip_validation) {
+        return clip_validation;
+    }
+
+    for (const auto& track : timeline.tracks) {
+        for (const auto& existing_clip : track.media_clips) {
+            if (existing_clip.id == clip.id) {
+                return Error{
+                    ErrorCode::invalid_argument,
+                    "Duplicate clip ID: " + clip.id,
+                    std::nullopt
+                };
+            }
+        }
+        for (const auto& existing_clip : track.text_clips) {
+            if (existing_clip.id == clip.id) {
+                return Error{
+                    ErrorCode::invalid_argument,
+                    "Duplicate clip ID: " + clip.id,
+                    std::nullopt
+                };
+            }
+        }
+    }
+
+    Timeline candidate = timeline;
+
+    auto mutable_track = find_track(candidate, track_id);
+    if (!mutable_track) {
+        return mutable_track.error();
+    }
+
+    mutable_track.value()->media_clips.push_back(clip);
+
+    auto timeline_validation = validate_timeline(candidate);
+    if (!timeline_validation) {
+        return timeline_validation;
+    }
+
+    timeline = candidate;
+    return Result<void>{};
+}
+
+Result<void> add_text_clip(
+    Timeline& timeline,
+    const TrackId& track_id,
+    TextClip clip)
+{
+    auto track_result = find_track(timeline, track_id);
+    if (!track_result) {
+        return track_result.error();
+    }
+
+    if (track_result.value()->type != TrackType::text) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Cannot add text clip to non-text track: " + track_id,
+            std::nullopt
+        };
+    }
+
+    auto clip_validation = validate_text_clip(clip);
+    if (!clip_validation) {
+        return clip_validation;
+    }
+
+    for (const auto& track : timeline.tracks) {
+        for (const auto& existing_clip : track.media_clips) {
+            if (existing_clip.id == clip.id) {
+                return Error{
+                    ErrorCode::invalid_argument,
+                    "Duplicate clip ID: " + clip.id,
+                    std::nullopt
+                };
+            }
+        }
+        for (const auto& existing_clip : track.text_clips) {
+            if (existing_clip.id == clip.id) {
+                return Error{
+                    ErrorCode::invalid_argument,
+                    "Duplicate clip ID: " + clip.id,
+                    std::nullopt
+                };
+            }
+        }
+    }
+
+    Timeline candidate = timeline;
+
+    auto mutable_track = find_track(candidate, track_id);
+    if (!mutable_track) {
+        return mutable_track.error();
+    }
+
+    mutable_track.value()->text_clips.push_back(clip);
+
+    auto timeline_validation = validate_timeline(candidate);
+    if (!timeline_validation) {
+        return timeline_validation;
+    }
+
+    timeline = candidate;
+    return Result<void>{};
+}
+
+Result<void> remove_clip(Timeline& timeline, const ClipId& clip_id)
+{
+    auto media_clip_result = find_media_clip(timeline, clip_id);
+    auto text_clip_result = find_text_clip(timeline, clip_id);
+
+    if (!media_clip_result && !text_clip_result) {
+        return Error{
+            ErrorCode::file_not_found,
+            "Clip not found: " + clip_id,
+            std::nullopt
+        };
+    }
+
+    Timeline candidate = timeline;
+
+    for (auto& track : candidate.tracks) {
+        auto it = track.media_clips.begin();
+        while (it != track.media_clips.end()) {
+            if (it->id == clip_id) {
+                it = track.media_clips.erase(it);
+                timeline = candidate;
+                return Result<void>{};
+            } else {
+                ++it;
+            }
+        }
+
+        auto text_it = track.text_clips.begin();
+        while (text_it != track.text_clips.end()) {
+            if (text_it->id == clip_id) {
+                text_it = track.text_clips.erase(text_it);
+                timeline = candidate;
+                return Result<void>{};
+            } else {
+                ++text_it;
+            }
+        }
+    }
+
+    return Error{
+        ErrorCode::file_not_found,
+        "Clip not found: " + clip_id,
+        std::nullopt
+    };
+}
+
+Result<void> move_clip(
+    Timeline& timeline,
+    const ClipId& clip_id,
+    TimelineTime new_timeline_start)
+{
+    if (new_timeline_start < 0) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "New timeline start cannot be negative",
+            std::nullopt
+        };
+    }
+
+    auto media_clip_result = find_media_clip(timeline, clip_id);
+    bool is_media = media_clip_result.operator bool();
+
+    if (!is_media) {
+        auto text_clip_result = find_text_clip(timeline, clip_id);
+        if (!text_clip_result) {
+            return Error{
+                ErrorCode::file_not_found,
+                "Clip not found: " + clip_id,
+                std::nullopt
+            };
+        }
+    }
+
+    Timeline candidate = timeline;
+
+    if (is_media) {
+        auto mutable_clip = find_media_clip(candidate, clip_id);
+        if (!mutable_clip) {
+            return mutable_clip.error();
+        }
+
+        if (new_timeline_start > std::numeric_limits<TimelineTime>::max() - mutable_clip.value()->duration) {
+            return Error{
+                ErrorCode::invalid_argument,
+                "New timeline start and duration exceed maximum value",
+                std::nullopt
+            };
+        }
+
+        mutable_clip.value()->timeline_start = new_timeline_start;
+    } else {
+        auto mutable_clip = find_text_clip(candidate, clip_id);
+        if (!mutable_clip) {
+            return mutable_clip.error();
+        }
+
+        if (new_timeline_start > std::numeric_limits<TimelineTime>::max() - mutable_clip.value()->duration) {
+            return Error{
+                ErrorCode::invalid_argument,
+                "New timeline start and duration exceed maximum value",
+                std::nullopt
+            };
+        }
+
+        mutable_clip.value()->timeline_start = new_timeline_start;
+    }
+
+    auto timeline_validation = validate_timeline(candidate);
+    if (!timeline_validation) {
+        return timeline_validation;
+    }
+
+    timeline = candidate;
+    return Result<void>{};
+}
+
 } // namespace mvlab

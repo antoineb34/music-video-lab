@@ -935,3 +935,698 @@ TEST_CASE("Lookup does not mutate ordering", "[timeline][lookup]")
     REQUIRE(timeline.tracks[0].media_clips[1].id == "clip-1");
     REQUIRE(timeline.tracks[0].media_clips[2].id == "clip-2");
 }
+
+// ===== Track editing operations =====
+
+TEST_CASE("Add valid empty track", "[timeline][editing]")
+{
+    Timeline timeline{{}};
+    Track track{
+        "track-1",
+        TrackType::audio,
+        "A",
+        {},
+        {}
+    };
+    auto result = add_track(timeline, track);
+    REQUIRE(result);
+    REQUIRE(timeline.tracks.size() == 1);
+    REQUIRE(timeline.tracks[0].id == "track-1");
+}
+
+TEST_CASE("Add valid populated track", "[timeline][editing]")
+{
+    Timeline timeline{{}};
+    Track track{
+        "track-1",
+        TrackType::audio,
+        "Backing",
+        {
+            MediaClip{"clip-1", "asset-1", 0, 0, 1000000},
+            MediaClip{"clip-2", "asset-2", 1000000, 0, 1000000}
+        },
+        {}
+    };
+    auto result = add_track(timeline, track);
+    REQUIRE(result);
+    REQUIRE(timeline.tracks.size() == 1);
+    REQUIRE(timeline.tracks[0].media_clips.size() == 2);
+}
+
+TEST_CASE("Add track with invalid contents rejects", "[timeline][editing]")
+{
+    Timeline timeline{{}};
+    Track track{
+        "track-1",
+        TrackType::audio,
+        "A",
+        {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+        {TextClip{"clip-2", "Hello", 0, 1000000}}
+    };
+    auto result = add_track(timeline, track);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+    REQUIRE(timeline.tracks.empty());
+}
+
+TEST_CASE("Reject duplicate track ID", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {"track-1", TrackType::audio, "A", {}, {}}
+        }
+    };
+    Track track{
+        "track-1",
+        TrackType::video,
+        "B",
+        {},
+        {}
+    };
+    auto result = add_track(timeline, track);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+    REQUIRE(timeline.tracks.size() == 1);
+}
+
+TEST_CASE("Reject globally duplicate clip ID when adding track", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+                {}
+            }
+        }
+    };
+    Track track{
+        "track-2",
+        TrackType::video,
+        "B",
+        {MediaClip{"clip-1", "asset-2", 0, 0, 1000000}},
+        {}
+    };
+    auto result = add_track(timeline, track);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+    REQUIRE(timeline.tracks.size() == 1);
+}
+
+TEST_CASE("Remove existing track", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {"track-1", TrackType::audio, "A", {}, {}},
+            {"track-2", TrackType::video, "B", {}, {}}
+        }
+    };
+    auto result = remove_track(timeline, "track-1");
+    REQUIRE(result);
+    REQUIRE(timeline.tracks.size() == 1);
+    REQUIRE(timeline.tracks[0].id == "track-2");
+}
+
+TEST_CASE("Remove track and all its clips", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {
+                    MediaClip{"clip-1", "asset-1", 0, 0, 1000000},
+                    MediaClip{"clip-2", "asset-2", 1000000, 0, 1000000}
+                },
+                {}
+            }
+        }
+    };
+    auto result = remove_track(timeline, "track-1");
+    REQUIRE(result);
+    REQUIRE(timeline.tracks.empty());
+}
+
+TEST_CASE("Remove missing track rejects", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {"track-1", TrackType::audio, "A", {}, {}}
+        }
+    };
+    auto result = remove_track(timeline, "track-999");
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::file_not_found);
+    REQUIRE(timeline.tracks.size() == 1);
+}
+
+TEST_CASE("Failed track removal leaves timeline unchanged", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {"track-1", TrackType::audio, "A", {}, {}}
+        }
+    };
+    auto original = timeline;
+    remove_track(timeline, "track-999");
+    REQUIRE(timeline.tracks.size() == original.tracks.size());
+    REQUIRE(timeline.tracks[0].id == original.tracks[0].id);
+}
+
+// ===== Media clip insertion =====
+
+TEST_CASE("Add media clip to audio track", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {"track-1", TrackType::audio, "A", {}, {}}
+        }
+    };
+    MediaClip clip{"clip-1", "asset-1", 0, 0, 1000000};
+    auto result = add_media_clip(timeline, "track-1", clip);
+    REQUIRE(result);
+    REQUIRE(timeline.tracks[0].media_clips.size() == 1);
+    REQUIRE(timeline.tracks[0].media_clips[0].id == "clip-1");
+}
+
+TEST_CASE("Add media clip to video track", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {"track-1", TrackType::video, "V", {}, {}}
+        }
+    };
+    MediaClip clip{"clip-1", "asset-1", 0, 0, 1000000};
+    auto result = add_media_clip(timeline, "track-1", clip);
+    REQUIRE(result);
+    REQUIRE(timeline.tracks[0].media_clips.size() == 1);
+}
+
+TEST_CASE("Reject media clip on text track", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {"track-1", TrackType::text, "T", {}, {}}
+        }
+    };
+    MediaClip clip{"clip-1", "asset-1", 0, 0, 1000000};
+    auto result = add_media_clip(timeline, "track-1", clip);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+    REQUIRE(timeline.tracks[0].media_clips.empty());
+}
+
+TEST_CASE("Reject media clip on missing track", "[timeline][editing]")
+{
+    Timeline timeline{{}};
+    MediaClip clip{"clip-1", "asset-1", 0, 0, 1000000};
+    auto result = add_media_clip(timeline, "track-999", clip);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::file_not_found);
+}
+
+TEST_CASE("Reject duplicate clip ID when adding media clip", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+                {}
+            }
+        }
+    };
+    MediaClip clip{"clip-1", "asset-2", 1000000, 0, 1000000};
+    auto result = add_media_clip(timeline, "track-1", clip);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+    REQUIRE(timeline.tracks[0].media_clips.size() == 1);
+}
+
+TEST_CASE("Reject duplicate clip ID across different tracks", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+                {}
+            },
+            {"track-2", TrackType::video, "V", {}, {}}
+        }
+    };
+    MediaClip clip{"clip-1", "asset-2", 0, 0, 1000000};
+    auto result = add_media_clip(timeline, "track-2", clip);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+    REQUIRE(timeline.tracks[1].media_clips.empty());
+}
+
+TEST_CASE("Reject overlapping media clips", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+                {}
+            }
+        }
+    };
+    MediaClip clip{"clip-2", "asset-2", 500000, 0, 1000000};
+    auto result = add_media_clip(timeline, "track-1", clip);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+}
+
+TEST_CASE("Allow exact endpoint adjacency for media clips", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+                {}
+            }
+        }
+    };
+    MediaClip clip{"clip-2", "asset-2", 1000000, 0, 1000000};
+    auto result = add_media_clip(timeline, "track-1", clip);
+    REQUIRE(result);
+    REQUIRE(timeline.tracks[0].media_clips.size() == 2);
+}
+
+TEST_CASE("Failed media clip insertion leaves timeline unchanged", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+                {}
+            }
+        }
+    };
+    auto original = timeline;
+    MediaClip clip{"clip-1", "asset-2", 1000000, 0, 1000000};
+    add_media_clip(timeline, "track-1", clip);
+    REQUIRE(timeline.tracks[0].media_clips.size() == original.tracks[0].media_clips.size());
+}
+
+// ===== Text clip insertion =====
+
+TEST_CASE("Add text clip to text track", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {"track-1", TrackType::text, "T", {}, {}}
+        }
+    };
+    TextClip clip{"clip-1", "Verse", 0, 1000000};
+    auto result = add_text_clip(timeline, "track-1", clip);
+    REQUIRE(result);
+    REQUIRE(timeline.tracks[0].text_clips.size() == 1);
+    REQUIRE(timeline.tracks[0].text_clips[0].id == "clip-1");
+}
+
+TEST_CASE("Reject text clip on audio track", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {"track-1", TrackType::audio, "A", {}, {}}
+        }
+    };
+    TextClip clip{"clip-1", "Hello", 0, 1000000};
+    auto result = add_text_clip(timeline, "track-1", clip);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+    REQUIRE(timeline.tracks[0].text_clips.empty());
+}
+
+TEST_CASE("Reject text clip on video track", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {"track-1", TrackType::video, "V", {}, {}}
+        }
+    };
+    TextClip clip{"clip-1", "Hello", 0, 1000000};
+    auto result = add_text_clip(timeline, "track-1", clip);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+    REQUIRE(timeline.tracks[0].text_clips.empty());
+}
+
+TEST_CASE("Reject text clip on missing track", "[timeline][editing]")
+{
+    Timeline timeline{{}};
+    TextClip clip{"clip-1", "Hello", 0, 1000000};
+    auto result = add_text_clip(timeline, "track-999", clip);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::file_not_found);
+}
+
+TEST_CASE("Reject duplicate clip ID when adding text clip", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::text,
+                "T",
+                {},
+                {TextClip{"clip-1", "Verse", 0, 1000000}}
+            }
+        }
+    };
+    TextClip clip{"clip-1", "Chorus", 1000000, 1000000};
+    auto result = add_text_clip(timeline, "track-1", clip);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+    REQUIRE(timeline.tracks[0].text_clips.size() == 1);
+}
+
+TEST_CASE("Reject overlapping text clips", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::text,
+                "T",
+                {},
+                {TextClip{"clip-1", "Verse", 0, 1000000}}
+            }
+        }
+    };
+    TextClip clip{"clip-2", "Chorus", 500000, 1000000};
+    auto result = add_text_clip(timeline, "track-1", clip);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+}
+
+TEST_CASE("Allow exact endpoint adjacency for text clips", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::text,
+                "T",
+                {},
+                {TextClip{"clip-1", "Verse", 0, 1000000}}
+            }
+        }
+    };
+    TextClip clip{"clip-2", "Chorus", 1000000, 1000000};
+    auto result = add_text_clip(timeline, "track-1", clip);
+    REQUIRE(result);
+    REQUIRE(timeline.tracks[0].text_clips.size() == 2);
+}
+
+TEST_CASE("Failed text clip insertion leaves timeline unchanged", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::text,
+                "T",
+                {},
+                {TextClip{"clip-1", "Verse", 0, 1000000}}
+            }
+        }
+    };
+    auto original = timeline;
+    TextClip clip{"clip-1", "Chorus", 1000000, 1000000};
+    add_text_clip(timeline, "track-1", clip);
+    REQUIRE(timeline.tracks[0].text_clips.size() == original.tracks[0].text_clips.size());
+}
+
+// ===== Clip removal =====
+
+TEST_CASE("Remove media clip", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {
+                    MediaClip{"clip-1", "asset-1", 0, 0, 1000000},
+                    MediaClip{"clip-2", "asset-2", 1000000, 0, 1000000}
+                },
+                {}
+            }
+        }
+    };
+    auto result = remove_clip(timeline, "clip-1");
+    REQUIRE(result);
+    REQUIRE(timeline.tracks[0].media_clips.size() == 1);
+    REQUIRE(timeline.tracks[0].media_clips[0].id == "clip-2");
+}
+
+TEST_CASE("Remove text clip", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::text,
+                "T",
+                {},
+                {
+                    TextClip{"clip-1", "Verse", 0, 1000000},
+                    TextClip{"clip-2", "Chorus", 1000000, 1000000}
+                }
+            }
+        }
+    };
+    auto result = remove_clip(timeline, "clip-1");
+    REQUIRE(result);
+    REQUIRE(timeline.tracks[0].text_clips.size() == 1);
+    REQUIRE(timeline.tracks[0].text_clips[0].id == "clip-2");
+}
+
+TEST_CASE("Remove clip from correct track only", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+                {}
+            },
+            {
+                "track-2",
+                TrackType::video,
+                "V",
+                {MediaClip{"clip-2", "asset-2", 0, 0, 1000000}},
+                {}
+            }
+        }
+    };
+    auto result = remove_clip(timeline, "clip-2");
+    REQUIRE(result);
+    REQUIRE(timeline.tracks[0].media_clips.size() == 1);
+    REQUIRE(timeline.tracks[1].media_clips.empty());
+}
+
+TEST_CASE("Remove missing clip rejects", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+                {}
+            }
+        }
+    };
+    auto result = remove_clip(timeline, "clip-999");
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::file_not_found);
+}
+
+TEST_CASE("Failed clip removal leaves timeline unchanged", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+                {}
+            }
+        }
+    };
+    auto original = timeline;
+    remove_clip(timeline, "clip-999");
+    REQUIRE(timeline.tracks[0].media_clips.size() == original.tracks[0].media_clips.size());
+    REQUIRE(timeline.tracks[0].media_clips[0].id == original.tracks[0].media_clips[0].id);
+}
+
+// ===== Clip movement =====
+
+TEST_CASE("Move media clip successfully", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+                {}
+            }
+        }
+    };
+    auto result = move_clip(timeline, "clip-1", 5000000);
+    REQUIRE(result);
+    REQUIRE(timeline.tracks[0].media_clips[0].timeline_start == 5000000);
+    REQUIRE(timeline.tracks[0].media_clips[0].duration == 1000000);
+}
+
+TEST_CASE("Move text clip successfully", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::text,
+                "T",
+                {},
+                {TextClip{"clip-1", "Verse", 0, 1000000}}
+            }
+        }
+    };
+    auto result = move_clip(timeline, "clip-1", 5000000);
+    REQUIRE(result);
+    REQUIRE(timeline.tracks[0].text_clips[0].timeline_start == 5000000);
+    REQUIRE(timeline.tracks[0].text_clips[0].duration == 1000000);
+}
+
+TEST_CASE("Reject negative start when moving clip", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+                {}
+            }
+        }
+    };
+    auto original = timeline;
+    auto result = move_clip(timeline, "clip-1", -1000000);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+    REQUIRE(timeline.tracks[0].media_clips[0].timeline_start == original.tracks[0].media_clips[0].timeline_start);
+}
+
+TEST_CASE("Reject overflow when moving clip", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
+                {}
+            }
+        }
+    };
+    auto original = timeline;
+    auto result = move_clip(timeline, "clip-1", std::numeric_limits<TimelineTime>::max() - 100);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+    REQUIRE(timeline.tracks[0].media_clips[0].timeline_start == original.tracks[0].media_clips[0].timeline_start);
+}
+
+TEST_CASE("Reject resulting overlap when moving clip", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {
+                    MediaClip{"clip-1", "asset-1", 0, 0, 1000000},
+                    MediaClip{"clip-2", "asset-2", 2000000, 0, 1000000}
+                },
+                {}
+            }
+        }
+    };
+    auto original = timeline;
+    auto result = move_clip(timeline, "clip-2", 500000);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+    REQUIRE(timeline.tracks[0].media_clips[1].timeline_start == original.tracks[0].media_clips[1].timeline_start);
+}
+
+TEST_CASE("Allow adjacency when moving clip", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {
+                    MediaClip{"clip-1", "asset-1", 0, 0, 1000000},
+                    MediaClip{"clip-2", "asset-2", 2000000, 0, 1000000}
+                },
+                {}
+            }
+        }
+    };
+    auto result = move_clip(timeline, "clip-2", 1000000);
+    REQUIRE(result);
+    REQUIRE(timeline.tracks[0].media_clips[1].timeline_start == 1000000);
+}
+
+TEST_CASE("Failed clip move preserves original timeline state", "[timeline][editing]")
+{
+    Timeline timeline{
+        {
+            {
+                "track-1",
+                TrackType::audio,
+                "A",
+                {
+                    MediaClip{"clip-1", "asset-1", 0, 0, 1000000},
+                    MediaClip{"clip-2", "asset-2", 2000000, 0, 1000000}
+                },
+                {}
+            }
+        }
+    };
+    auto original = timeline;
+    move_clip(timeline, "clip-2", 500000);
+    REQUIRE(timeline.tracks[0].media_clips[0].timeline_start == original.tracks[0].media_clips[0].timeline_start);
+    REQUIRE(timeline.tracks[0].media_clips[1].timeline_start == original.tracks[0].media_clips[1].timeline_start);
+}
