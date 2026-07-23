@@ -1,7 +1,9 @@
 #include "project_model.hpp"
 #include "logger.hpp"
+#include "media_asset.hpp"
 #include <fstream>
 #include <filesystem>
+#include <unordered_set>
 #include <unistd.h>
 
 namespace mvlab {
@@ -48,6 +50,23 @@ Result<void> validate_project(const Project& project)
         }
     }
 
+    std::unordered_set<std::string> seen_ids;
+    for (const auto& asset : project.assets) {
+        auto asset_validation = validate_media_asset(asset);
+        if (!asset_validation) {
+            return asset_validation.error();
+        }
+
+        if (seen_ids.find(asset.id) != seen_ids.end()) {
+            return Error{
+                ErrorCode::invalid_argument,
+                "Duplicate asset ID: " + asset.id,
+                std::nullopt
+            };
+        }
+        seen_ids.insert(asset.id);
+    }
+
     return Result<void>{};
 }
 
@@ -64,6 +83,7 @@ Result<Project> create_project(const std::string& name)
     project.background = Background{};
     project.lyrics = Lyrics{};
     project.export_settings = ExportSettings{1920, 1080, 30};
+    project.assets = std::vector<MediaAsset>{};
     return project;
 }
 
@@ -141,7 +161,7 @@ Result<Project> load_project(const std::string& file_path)
     Project project;
     try {
         project = j.get<Project>();
-    } catch (const nlohmann::json::exception& e) {
+    } catch (const std::exception& e) {
         return Error{ErrorCode::malformed_project, "Malformed project data: " + file_path, std::string(e.what())};
     }
 

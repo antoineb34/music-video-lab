@@ -1,4 +1,4 @@
-# MusicVideoLab Agent Instructions
+# MusicVideoLab Repository Guidelines
 
 ## Project identity
 
@@ -186,6 +186,10 @@ git pull
 - Clean up working tree.
 - Report branch name, commits ahead, and work summary.
 - Do not push, open a PR, merge, or delete the branch.
+
+**Commit attribution:**
+
+Use the configured Git author for repository commits. Do not add automated co-author trailers, generated-by notices, tool signatures, or promotional metadata to commit messages, pull-request descriptions, source files, or documentation unless explicitly requested by the team.
 
 **Absolute rules:**
 - Never force-push or delete `main`.

@@ -41,6 +41,7 @@ add_library(mvlab_core STATIC
     src/audio_inspector.cpp
     src/audio_analyzer.cpp
     src/project_model.cpp
+    src/media_asset.cpp
 )
 
 target_include_directories(mvlab_core PUBLIC
@@ -83,6 +84,7 @@ add_executable(
     tests/audio_inspector_tests.cpp
     tests/audio_analyzer_tests.cpp
     tests/project_model_tests.cpp
+    tests/media_asset_tests.cpp
 )
 
 target_link_libraries(mvlab_tests PRIVATE
