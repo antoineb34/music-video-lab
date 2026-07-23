@@ -23,7 +23,12 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
     GIT_TAG v2.6.2
 )
-FetchContent_MakeAvailable(Catch2 CLI11)
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+)
+FetchContent_MakeAvailable(Catch2 CLI11 nlohmann_json)
 
 enable_testing()
 
@@ -31,10 +36,15 @@ enable_testing()
 add_library(mvlab_core STATIC
     src/audio_inspector.cpp
     src/audio_analyzer.cpp
+    src/project_model.cpp
 )
 
 target_include_directories(mvlab_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(mvlab_core PUBLIC
+    nlohmann_json::nlohmann_json
 )
 
 target_compile_options(mvlab_core PRIVATE
@@ -64,6 +74,7 @@ add_executable(
     tests/smoke_tests.cpp
     tests/audio_inspector_tests.cpp
     tests/audio_analyzer_tests.cpp
+    tests/project_model_tests.cpp
 )
 
 target_link_libraries(mvlab_tests PRIVATE
