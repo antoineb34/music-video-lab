@@ -19,12 +19,14 @@ int main(int argc, char** argv)
     inspect_cmd->add_option("file", audio_file, "Path to audio file")->required();
 
     inspect_cmd->callback([&audio_file]() {
-        auto [result, error] = mvlab::inspect_audio(audio_file);
+        auto outcome = mvlab::inspect_audio(audio_file);
 
-        if (!error.empty()) {
-            std::cerr << "Error: " << error << "\n";
+        if (!outcome) {
+            std::cerr << "Error: " << outcome.error().message << "\n";
             std::exit(1);
         }
+
+        const auto& result = outcome.value();
 
         // Print in human-readable format
         std::cout << "File:        " << audio_file << "\n";
@@ -52,12 +54,14 @@ int main(int argc, char** argv)
     analyze_cmd->add_option("--points", envelope_points, "Waveform envelope points (default: 100)");
 
     analyze_cmd->callback([&analyze_file, &envelope_points]() {
-        auto [result, error] = mvlab::analyze_audio(analyze_file, envelope_points);
+        auto outcome = mvlab::analyze_audio(analyze_file, envelope_points);
 
-        if (!error.empty()) {
-            std::cerr << "Error: " << error << "\n";
+        if (!outcome) {
+            std::cerr << "Error: " << outcome.error().message << "\n";
             std::exit(1);
         }
+
+        const auto& result = outcome.value();
 
         // Print in human-readable format
         std::cout << "File:              " << analyze_file << "\n";

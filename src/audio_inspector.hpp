@@ -1,8 +1,8 @@
 #ifndef MVLAB_AUDIO_INSPECTOR_HPP
 #define MVLAB_AUDIO_INSPECTOR_HPP
 
+#include "result.hpp"
 #include <string>
-#include <utility>
 
 namespace mvlab {
 
@@ -15,7 +15,7 @@ struct AudioInspectResult {
     std::string format_bitrate;
 };
 
-std::pair<AudioInspectResult, std::string> inspect_audio(const std::string& file_path);
+Result<AudioInspectResult> inspect_audio(const std::string& file_path);
 
 } // namespace mvlab
 

@@ -1,4 +1,5 @@
 #include "audio_analyzer.hpp"
+#include "logger.hpp"
 #include <filesystem>
 #include <cstdint>
 #include <unistd.h>
@@ -11,7 +12,17 @@ namespace mvlab {
 
 namespace fs = std::filesystem;
 
-std::pair<AudioAnalysisResult, std::string> analyze_audio(
+namespace {
+
+// See audio_inspector.cpp for the same convention: 127 is execvp()'s
+// standard "command not found" signal; 126 marks an internal setup
+// failure (pipe/dup2) inside the forked child, distinct from a missing tool.
+constexpr int kChildSetupFailureExitCode = 126;
+constexpr int kExecFailedExitCode = 127;
+
+} // namespace
+
+Result<AudioAnalysisResult> analyze_audio(
     const std::string& file_path,
     int envelope_points)
 {
@@ -19,41 +30,60 @@ std::pair<AudioAnalysisResult, std::string> analyze_audio(
 
     // Validate inputs
     if (envelope_points <= 0) {
-        return {result, "Points must be greater than zero"};
+        return Error{ErrorCode::invalid_argument, "Points must be greater than zero", std::nullopt};
     }
 
     // Check if file exists
     if (!fs::exists(file_path)) {
-        return {result, "File not found: " + file_path};
+        return Error{ErrorCode::file_not_found, "File not found: " + file_path, std::nullopt};
+    }
+
+    if (access(file_path.c_str(), R_OK) != 0) {
+        return Error{ErrorCode::permission_denied, "Audio file is not readable: " + file_path, std::nullopt};
     }
 
     // Get file size to estimate if it's reasonable audio
     uintmax_t file_size = fs::file_size(file_path);
     if (file_size == 0) {
-        return {result, "File is empty"};
+        return Error{ErrorCode::invalid_media, "Audio file is empty: " + file_path, std::nullopt};
     }
 
     // First, get audio metadata using ffprobe
     int probe_pipe[2];
+    int probe_stderr_pipe[2];
     if (pipe(probe_pipe) == -1) {
-        return {result, "Failed to create probe pipe"};
+        return Error{ErrorCode::internal_error, "Failed to create probe pipe", std::nullopt};
     }
+    if (pipe(probe_stderr_pipe) == -1) {
+        close(probe_pipe[0]);
+        close(probe_pipe[1]);
+        return Error{ErrorCode::internal_error, "Failed to create probe stderr pipe", std::nullopt};
+    }
+
+    Logger::instance().debug("Launching ffprobe (metadata probe) for " + file_path);
 
     pid_t probe_pid = fork();
     if (probe_pid == -1) {
         close(probe_pipe[0]);
         close(probe_pipe[1]);
-        return {result, "Failed to fork ffprobe"};
+        close(probe_stderr_pipe[0]);
+        close(probe_stderr_pipe[1]);
+        return Error{ErrorCode::internal_error, "Failed to fork ffprobe", std::nullopt};
     }
 
     if (probe_pid == 0) {
         // Child: ffprobe to get stream info
         close(probe_pipe[0]);
+        close(probe_stderr_pipe[0]);
 
         if (dup2(probe_pipe[1], STDOUT_FILENO) == -1) {
-            _exit(127);
+            _exit(kChildSetupFailureExitCode);
+        }
+        if (dup2(probe_stderr_pipe[1], STDERR_FILENO) == -1) {
+            _exit(kChildSetupFailureExitCode);
         }
         close(probe_pipe[1]);
+        close(probe_stderr_pipe[1]);
 
         const char* probe_argv[] = {
             "ffprobe",
@@ -66,11 +96,12 @@ std::pair<AudioAnalysisResult, std::string> analyze_audio(
         };
 
         execvp("ffprobe", (char* const*)probe_argv);
-        _exit(127);
+        _exit(kExecFailedExitCode);
     }
 
     // Parent: read from probe
     close(probe_pipe[1]);
+    close(probe_stderr_pipe[1]);
 
     std::string probe_output;
     char buffer[256];
@@ -80,14 +111,37 @@ std::pair<AudioAnalysisResult, std::string> analyze_audio(
     }
     close(probe_pipe[0]);
 
+    std::string probe_stderr;
+    while ((bytes_read = read(probe_stderr_pipe[0], buffer, sizeof(buffer))) > 0) {
+        probe_stderr.append(buffer, bytes_read);
+    }
+    close(probe_stderr_pipe[0]);
+
     // Wait for ffprobe
     int probe_status;
     if (waitpid(probe_pid, &probe_status, 0) == -1) {
-        return {result, "Failed to wait for ffprobe"};
+        return Error{ErrorCode::internal_error, "Failed to wait for ffprobe", std::nullopt};
     }
 
-    if (!WIFEXITED(probe_status) || WEXITSTATUS(probe_status) != 0) {
-        return {result, "Could not read audio format"};
+    if (!WIFEXITED(probe_status)) {
+        return Error{ErrorCode::internal_error, "ffprobe terminated abnormally", std::nullopt};
+    }
+
+    int probe_exit_code = WEXITSTATUS(probe_status);
+    if (probe_exit_code == kExecFailedExitCode) {
+        Logger::instance().debug("ffprobe not found on PATH");
+        return Error{ErrorCode::external_tool_unavailable, "ffprobe is not installed or not on PATH", std::nullopt};
+    }
+    if (probe_exit_code == kChildSetupFailureExitCode) {
+        return Error{ErrorCode::internal_error, "Failed to prepare ffprobe process", std::nullopt};
+    }
+    if (probe_exit_code != 0) {
+        Logger::instance().debug("ffprobe probe exited with code " + std::to_string(probe_exit_code) + " for " + file_path);
+        return Error{
+            ErrorCode::invalid_media,
+            "Could not read audio format: " + file_path,
+            probe_stderr.empty() ? std::nullopt : std::optional<std::string>(probe_stderr)
+        };
     }
 
     // Parse probe output for sample_rate and channels
@@ -118,7 +172,11 @@ std::pair<AudioAnalysisResult, std::string> analyze_audio(
     }
 
     if (sample_rate <= 0 || channels <= 0) {
-        return {result, "Could not determine audio format"};
+        return Error{
+            ErrorCode::malformed_external_output,
+            "Could not determine audio format: " + file_path,
+            probe_output.empty() ? std::nullopt : std::optional<std::string>(probe_output)
+        };
     }
 
     result.sample_rate = sample_rate;
@@ -129,13 +187,15 @@ std::pair<AudioAnalysisResult, std::string> analyze_audio(
     int stderr_pipe[2];
 
     if (pipe(audio_pipe) == -1) {
-        return {result, "Failed to create audio pipe"};
+        return Error{ErrorCode::internal_error, "Failed to create audio pipe", std::nullopt};
     }
     if (pipe(stderr_pipe) == -1) {
         close(audio_pipe[0]);
         close(audio_pipe[1]);
-        return {result, "Failed to create stderr pipe"};
+        return Error{ErrorCode::internal_error, "Failed to create stderr pipe", std::nullopt};
     }
+
+    Logger::instance().debug("Launching ffmpeg decode for " + file_path);
 
     pid_t pid = fork();
     if (pid == -1) {
@@ -143,7 +203,7 @@ std::pair<AudioAnalysisResult, std::string> analyze_audio(
         close(audio_pipe[1]);
         close(stderr_pipe[0]);
         close(stderr_pipe[1]);
-        return {result, "Failed to fork process"};
+        return Error{ErrorCode::internal_error, "Failed to fork process", std::nullopt};
     }
 
     if (pid == 0) {
@@ -153,11 +213,11 @@ std::pair<AudioAnalysisResult, std::string> analyze_audio(
 
         // Redirect stdout to audio pipe
         if (dup2(audio_pipe[1], STDOUT_FILENO) == -1) {
-            _exit(127);
+            _exit(kChildSetupFailureExitCode);
         }
         // Redirect stderr to pipe (to suppress ffmpeg messages)
         if (dup2(stderr_pipe[1], STDERR_FILENO) == -1) {
-            _exit(127);
+            _exit(kChildSetupFailureExitCode);
         }
 
         close(audio_pipe[1]);
@@ -175,7 +235,7 @@ std::pair<AudioAnalysisResult, std::string> analyze_audio(
         };
 
         execvp("ffmpeg", (char* const*)argv);
-        _exit(127);
+        _exit(kExecFailedExitCode);
     }
 
     // Parent process
@@ -205,31 +265,44 @@ std::pair<AudioAnalysisResult, std::string> analyze_audio(
     // Wait for ffmpeg
     int status;
     if (waitpid(pid, &status, 0) == -1) {
-        return {result, "Failed to wait for ffmpeg process"};
+        return Error{ErrorCode::internal_error, "Failed to wait for ffmpeg process", std::nullopt};
     }
 
     if (!WIFEXITED(status)) {
-        return {result, "ffmpeg terminated abnormally"};
+        return Error{ErrorCode::internal_error, "ffmpeg terminated abnormally", std::nullopt};
     }
 
     int exit_code = WEXITSTATUS(status);
+    if (exit_code == kExecFailedExitCode) {
+        Logger::instance().debug("ffmpeg not found on PATH");
+        return Error{ErrorCode::external_tool_unavailable, "ffmpeg is not installed or not on PATH", std::nullopt};
+    }
+    if (exit_code == kChildSetupFailureExitCode) {
+        return Error{ErrorCode::internal_error, "Failed to prepare ffmpeg process", std::nullopt};
+    }
     if (exit_code != 0) {
-        if (!stderr_data.empty()) {
-            return {result, "ffmpeg error"};
-        }
-        return {result, "ffmpeg failed with exit code " + std::to_string(exit_code)};
+        Logger::instance().debug("ffmpeg exited with code " + std::to_string(exit_code) + " for " + file_path);
+        return Error{
+            ErrorCode::invalid_media,
+            "Failed to decode audio file: " + file_path,
+            stderr_data.empty() ? std::nullopt : std::optional<std::string>(stderr_data)
+        };
     }
 
     // Check if we got any PCM data
     if (pcm_samples.empty()) {
-        return {result, "No audio samples decoded"};
+        return Error{ErrorCode::invalid_media, "No audio samples decoded from: " + file_path, std::nullopt};
     }
 
     // Calculate number of frames
     uint64_t num_frames = pcm_samples.size() / channels;
     if (pcm_samples.size() % channels != 0) {
         // Truncated PCM data
-        return {result, "Truncated or malformed PCM output"};
+        return Error{
+            ErrorCode::malformed_external_output,
+            "Truncated or malformed PCM output from: " + file_path,
+            std::nullopt
+        };
     }
 
     result.total_frames = num_frames;
@@ -279,7 +352,7 @@ std::pair<AudioAnalysisResult, std::string> analyze_audio(
         }
     }
 
-    return {result, ""};
+    return result;
 }
 
 } // namespace mvlab

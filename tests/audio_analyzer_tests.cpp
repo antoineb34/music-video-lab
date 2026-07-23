@@ -66,9 +66,10 @@ TEST_CASE("mvlab::analyze_audio with valid stereo WAV succeeds", "[analyzer]")
     REQUIRE(!temp_file.empty());
     REQUIRE(fs::exists(temp_file));
 
-    auto [result, error] = mvlab::analyze_audio(temp_file);
+    auto outcome = mvlab::analyze_audio(temp_file);
 
-    CHECK(error.empty());
+    REQUIRE(outcome.has_value());
+    const auto& result = outcome.value();
     CHECK(result.total_frames > 0);
     CHECK(result.channels > 0);
     CHECK(result.sample_rate > 0);
@@ -82,9 +83,10 @@ TEST_CASE("mvlab::analyze_audio with valid mono WAV succeeds", "[analyzer]")
     std::string temp_file = create_temp_mono_wav(0.5);
     REQUIRE(!temp_file.empty());
 
-    auto [result, error] = mvlab::analyze_audio(temp_file);
+    auto outcome = mvlab::analyze_audio(temp_file);
 
-    CHECK(error.empty());
+    REQUIRE(outcome.has_value());
+    const auto& result = outcome.value();
     CHECK(result.channels == 1);
     CHECK(result.total_frames > 0);
     CHECK(result.sample_rate > 0);
@@ -97,13 +99,13 @@ TEST_CASE("mvlab::analyze_audio envelope point count matches --points", "[analyz
     std::string temp_file = create_temp_wav_analyzer(0.5);
     REQUIRE(!temp_file.empty());
 
-    auto [result_50, error_50] = mvlab::analyze_audio(temp_file, 50);
-    CHECK(error_50.empty());
-    CHECK(result_50.waveform_envelope.size() == 50);
+    auto outcome_50 = mvlab::analyze_audio(temp_file, 50);
+    REQUIRE(outcome_50.has_value());
+    CHECK(outcome_50.value().waveform_envelope.size() == 50);
 
-    auto [result_200, error_200] = mvlab::analyze_audio(temp_file, 200);
-    CHECK(error_200.empty());
-    CHECK(result_200.waveform_envelope.size() == 200);
+    auto outcome_200 = mvlab::analyze_audio(temp_file, 200);
+    REQUIRE(outcome_200.has_value());
+    CHECK(outcome_200.value().waveform_envelope.size() == 200);
 
     cleanup_temp_file(temp_file);
 }
@@ -113,11 +115,11 @@ TEST_CASE("mvlab::analyze_audio peak amplitude within range", "[analyzer]")
     std::string temp_file = create_temp_wav_analyzer(0.5);
     REQUIRE(!temp_file.empty());
 
-    auto [result, error] = mvlab::analyze_audio(temp_file);
+    auto outcome = mvlab::analyze_audio(temp_file);
 
-    CHECK(error.empty());
-    CHECK(result.peak_amplitude >= 0.0);
-    CHECK(result.peak_amplitude <= 1.0);
+    REQUIRE(outcome.has_value());
+    CHECK(outcome.value().peak_amplitude >= 0.0);
+    CHECK(outcome.value().peak_amplitude <= 1.0);
 
     cleanup_temp_file(temp_file);
 }
@@ -127,11 +129,11 @@ TEST_CASE("mvlab::analyze_audio RMS amplitude within range", "[analyzer]")
     std::string temp_file = create_temp_wav_analyzer(0.5);
     REQUIRE(!temp_file.empty());
 
-    auto [result, error] = mvlab::analyze_audio(temp_file);
+    auto outcome = mvlab::analyze_audio(temp_file);
 
-    CHECK(error.empty());
-    CHECK(result.rms_amplitude >= 0.0);
-    CHECK(result.rms_amplitude <= 1.0);
+    REQUIRE(outcome.has_value());
+    CHECK(outcome.value().rms_amplitude >= 0.0);
+    CHECK(outcome.value().rms_amplitude <= 1.0);
 
     cleanup_temp_file(temp_file);
 }
@@ -141,36 +143,36 @@ TEST_CASE("mvlab::analyze_audio silent audio returns near-zero peak and RMS", "[
     std::string temp_file = create_temp_wav_analyzer(0.5);
     REQUIRE(!temp_file.empty());
 
-    auto [result, error] = mvlab::analyze_audio(temp_file);
+    auto outcome = mvlab::analyze_audio(temp_file);
 
-    CHECK(error.empty());
+    REQUIRE(outcome.has_value());
     // Silence should have very low amplitude
-    CHECK(result.peak_amplitude < 0.05);
-    CHECK(result.rms_amplitude < 0.05);
+    CHECK(outcome.value().peak_amplitude < 0.05);
+    CHECK(outcome.value().rms_amplitude < 0.05);
 
     cleanup_temp_file(temp_file);
 }
 
 TEST_CASE("mvlab::analyze_audio nonexistent file returns error", "[analyzer]")
 {
-    auto [result, error] = mvlab::analyze_audio("/tmp/mvlab_nonexistent_audio_xyz.wav");
+    auto outcome = mvlab::analyze_audio("/tmp/mvlab_nonexistent_audio_xyz.wav");
 
-    CHECK_FALSE(error.empty());
-    bool has_error_msg = (error.find("not found") != std::string::npos ||
-                          error.find("File not found") != std::string::npos);
-    CHECK(has_error_msg);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::file_not_found);
+    CHECK(outcome.error().message.find("not found") != std::string::npos);
 }
 
-TEST_CASE("mvlab::analyze_audio invalid file returns error", "[analyzer]")
+TEST_CASE("mvlab::analyze_audio invalid file returns typed invalid_media error", "[analyzer]")
 {
     std::string temp_file = "/tmp/mvlab_analyze_invalid.txt";
     FILE* f = std::fopen(temp_file.c_str(), "w");
     std::fprintf(f, "This is not an audio file\n");
     std::fclose(f);
 
-    auto [result, error] = mvlab::analyze_audio(temp_file);
+    auto outcome = mvlab::analyze_audio(temp_file);
 
-    CHECK_FALSE(error.empty());
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_media);
 
     cleanup_temp_file(temp_file);
 }
@@ -180,12 +182,11 @@ TEST_CASE("mvlab::analyze_audio points=0 is rejected", "[analyzer]")
     std::string temp_file = create_temp_wav_analyzer(0.5);
     REQUIRE(!temp_file.empty());
 
-    auto [result, error] = mvlab::analyze_audio(temp_file, 0);
+    auto outcome = mvlab::analyze_audio(temp_file, 0);
 
-    CHECK_FALSE(error.empty());
-    bool has_error_msg = (error.find("greater than zero") != std::string::npos ||
-                          error.find("Points must be") != std::string::npos);
-    CHECK(has_error_msg);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK(outcome.error().message.find("greater than zero") != std::string::npos);
 
     cleanup_temp_file(temp_file);
 }
@@ -195,9 +196,10 @@ TEST_CASE("mvlab::analyze_audio points=-1 is rejected", "[analyzer]")
     std::string temp_file = create_temp_wav_analyzer(0.5);
     REQUIRE(!temp_file.empty());
 
-    auto [result, error] = mvlab::analyze_audio(temp_file, -1);
+    auto outcome = mvlab::analyze_audio(temp_file, -1);
 
-    CHECK_FALSE(error.empty());
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_argument);
 
     cleanup_temp_file(temp_file);
 }
@@ -213,10 +215,10 @@ TEST_CASE("mvlab::analyze_audio path with spaces succeeds", "[analyzer]")
     REQUIRE(ret == 0);
     REQUIRE(fs::exists(spaced_file));
 
-    auto [result, error] = mvlab::analyze_audio(spaced_file);
+    auto outcome = mvlab::analyze_audio(spaced_file);
 
-    CHECK(error.empty());
-    CHECK(result.total_frames > 0);
+    REQUIRE(outcome.has_value());
+    CHECK(outcome.value().total_frames > 0);
 
     cleanup_temp_file(base_file);
     cleanup_temp_file(spaced_file);
@@ -227,11 +229,11 @@ TEST_CASE("mvlab::analyze_audio envelope values within range", "[analyzer]")
     std::string temp_file = create_temp_wav_analyzer(0.5);
     REQUIRE(!temp_file.empty());
 
-    auto [result, error] = mvlab::analyze_audio(temp_file);
+    auto outcome = mvlab::analyze_audio(temp_file);
 
-    CHECK(error.empty());
+    REQUIRE(outcome.has_value());
 
-    for (double val : result.waveform_envelope) {
+    for (double val : outcome.value().waveform_envelope) {
         CHECK(val >= 0.0);
         CHECK(val <= 1.0);
     }
@@ -244,10 +246,10 @@ TEST_CASE("mvlab::analyze_audio stereo has correct channel count", "[analyzer]")
     std::string temp_file = create_temp_wav_analyzer(0.5);
     REQUIRE(!temp_file.empty());
 
-    auto [result, error] = mvlab::analyze_audio(temp_file);
+    auto outcome = mvlab::analyze_audio(temp_file);
 
-    CHECK(error.empty());
-    CHECK(result.channels == 2);
+    REQUIRE(outcome.has_value());
+    CHECK(outcome.value().channels == 2);
 
     cleanup_temp_file(temp_file);
 }
@@ -257,10 +259,10 @@ TEST_CASE("mvlab::analyze_audio mono has correct channel count", "[analyzer]")
     std::string temp_file = create_temp_mono_wav(0.5);
     REQUIRE(!temp_file.empty());
 
-    auto [result, error] = mvlab::analyze_audio(temp_file);
+    auto outcome = mvlab::analyze_audio(temp_file);
 
-    CHECK(error.empty());
-    CHECK(result.channels == 1);
+    REQUIRE(outcome.has_value());
+    CHECK(outcome.value().channels == 1);
 
     cleanup_temp_file(temp_file);
 }
@@ -270,10 +272,33 @@ TEST_CASE("mvlab::analyze_audio sample rate is correct", "[analyzer]")
     std::string temp_file = create_temp_wav_analyzer(0.5);
     REQUIRE(!temp_file.empty());
 
-    auto [result, error] = mvlab::analyze_audio(temp_file);
+    auto outcome = mvlab::analyze_audio(temp_file);
 
-    CHECK(error.empty());
-    CHECK(result.sample_rate == 48000);
+    REQUIRE(outcome.has_value());
+    CHECK(outcome.value().sample_rate == 48000);
 
     cleanup_temp_file(temp_file);
+}
+
+TEST_CASE("mvlab::analyze_audio reports external_tool_unavailable when ffmpeg is missing", "[analyzer]")
+{
+    std::string temp_file = create_temp_wav_analyzer(0.5);
+    REQUIRE(!temp_file.empty());
+
+    std::string empty_path_dir = "/tmp/mvlab_empty_path_analyze";
+    fs::create_directories(empty_path_dir);
+
+    const char* original_path = std::getenv("PATH");
+    std::string saved_path = original_path ? original_path : "";
+    setenv("PATH", empty_path_dir.c_str(), 1);
+
+    auto outcome = mvlab::analyze_audio(temp_file);
+
+    setenv("PATH", saved_path.c_str(), 1);
+
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::external_tool_unavailable);
+
+    cleanup_temp_file(temp_file);
+    fs::remove_all(empty_path_dir);
 }
