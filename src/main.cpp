@@ -1,7 +1,9 @@
 #include "audio_inspector.hpp"
+#include "audio_analyzer.hpp"
 #include <CLI/CLI.hpp>
 #include <iostream>
 #include <string>
+#include <iomanip>
 
 int main(int argc, char** argv)
 {
@@ -38,6 +40,47 @@ int main(int argc, char** argv)
             bitrate = "unknown";
         }
         std::cout << "Bit rate:    " << bitrate << " bits/s\n";
+    });
+
+    auto* analyze_cmd = audio_cmd->add_subcommand("analyze", "Analyze audio file samples");
+
+    std::string analyze_file;
+    int envelope_points = 100;
+    analyze_cmd->add_option("file", analyze_file, "Path to audio file")->required();
+    analyze_cmd->add_option("--points", envelope_points, "Waveform envelope points (default: 100)");
+
+    analyze_cmd->callback([&analyze_file, &envelope_points]() {
+        auto [result, error] = mvlab::analyze_audio(analyze_file, envelope_points);
+
+        if (!error.empty()) {
+            std::cerr << "Error: " << error << "\n";
+            std::exit(1);
+        }
+
+        // Print in human-readable format
+        std::cout << "File:              " << analyze_file << "\n";
+        std::cout << "Total frames:      " << result.total_frames << "\n";
+        std::cout << "Channels:          " << result.channels << "\n";
+        std::cout << "Sample rate:       " << result.sample_rate << " Hz\n";
+        std::cout << "Peak amplitude:    " << std::fixed << std::setprecision(4)
+                  << result.peak_amplitude << "\n";
+        std::cout << "RMS amplitude:     " << std::fixed << std::setprecision(4)
+                  << result.rms_amplitude << "\n";
+        std::cout << "Envelope points:   " << result.waveform_envelope.size() << "\n";
+
+        if (!result.waveform_envelope.empty()) {
+            std::cout << "Envelope:          ";
+            for (size_t i = 0; i < result.waveform_envelope.size(); ++i) {
+                if (i > 0 && i % 20 == 0) {
+                    std::cout << "\n                   ";
+                }
+                std::cout << std::fixed << std::setprecision(2) << result.waveform_envelope[i];
+                if (i < result.waveform_envelope.size() - 1) {
+                    std::cout << " ";
+                }
+            }
+            std::cout << "\n";
+        }
     });
 
     try {

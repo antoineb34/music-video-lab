@@ -31,6 +31,7 @@ add_executable(
     mvlab
     src/main.cpp
     src/audio_inspector.cpp
+    src/audio_analyzer.cpp
 )
 
 target_compile_options(mvlab PRIVATE
@@ -44,7 +45,9 @@ add_executable(
     mvlab_tests
     tests/smoke_tests.cpp
     tests/audio_inspector_tests.cpp
+    tests/audio_analyzer_tests.cpp
     src/audio_inspector.cpp
+    src/audio_analyzer.cpp
 )
 target_include_directories(mvlab_tests PRIVATE src)
 target_link_libraries(mvlab_tests PRIVATE Catch2::Catch2WithMain)
