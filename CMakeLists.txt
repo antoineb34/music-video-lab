@@ -27,11 +27,25 @@ FetchContent_MakeAvailable(Catch2 CLI11)
 
 enable_testing()
 
+# Core library containing production logic (reusable across frontends)
+add_library(mvlab_core STATIC
+    src/audio_inspector.cpp
+    src/audio_analyzer.cpp
+)
+
+target_include_directories(mvlab_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_compile_options(mvlab_core PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->
+)
+
+# CLI executable (depends on core library)
 add_executable(
     mvlab
     src/main.cpp
-    src/audio_inspector.cpp
-    src/audio_analyzer.cpp
 )
 
 target_compile_options(mvlab PRIVATE
@@ -39,18 +53,24 @@ target_compile_options(mvlab PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->
 )
 
-target_link_libraries(mvlab PRIVATE CLI11::CLI11)
+target_link_libraries(mvlab PRIVATE
+    mvlab_core
+    CLI11::CLI11
+)
 
+# Test executable (links against core library)
 add_executable(
     mvlab_tests
     tests/smoke_tests.cpp
     tests/audio_inspector_tests.cpp
     tests/audio_analyzer_tests.cpp
-    src/audio_inspector.cpp
-    src/audio_analyzer.cpp
 )
-target_include_directories(mvlab_tests PRIVATE src)
-target_link_libraries(mvlab_tests PRIVATE Catch2::Catch2WithMain)
+
+target_link_libraries(mvlab_tests PRIVATE
+    mvlab_core
+    Catch2::Catch2WithMain
+)
+
 target_compile_options(mvlab_tests PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive->
