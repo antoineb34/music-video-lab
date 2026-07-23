@@ -153,6 +153,108 @@ TEST_CASE("parse_lrc_lyrics: simple timestamp [mm:ss]", "[lyrics][lrc][timestamp
     CHECK(lyrics.lines[1].start_time.value() == 20000);
 }
 
+TEST_CASE("parse_lrc_lyrics: single-digit minute 0", "[lyrics][lrc][timestamp]")
+{
+    std::string contents = "[0:01]Zero";
+    auto result = mvlab::parse_lrc_lyrics(contents);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().lines.size() == 1);
+    CHECK(result.value().lines[0].text == "Zero");
+    CHECK(result.value().lines[0].start_time.value() == 1000);
+}
+
+TEST_CASE("parse_lrc_lyrics: single-digit minute 1", "[lyrics][lrc][timestamp]")
+{
+    std::string contents = "[1:02]One";
+    auto result = mvlab::parse_lrc_lyrics(contents);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().lines.size() == 1);
+    CHECK(result.value().lines[0].text == "One");
+    CHECK(result.value().lines[0].start_time.value() == 62000);
+}
+
+TEST_CASE("parse_lrc_lyrics: two-digit minute boundary 99", "[lyrics][lrc][timestamp]")
+{
+    std::string contents = "[99:59]Ninety nine";
+    auto result = mvlab::parse_lrc_lyrics(contents);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().lines.size() == 1);
+    CHECK(result.value().lines[0].text == "Ninety nine");
+    mvlab::LyricTime expected = 99 * 60000 + 59 * 1000;
+    CHECK(result.value().lines[0].start_time.value() == expected);
+}
+
+TEST_CASE("parse_lrc_lyrics: three-digit minute 100", "[lyrics][lrc][timestamp]")
+{
+    std::string contents = "[100:00]One hundred";
+    auto result = mvlab::parse_lrc_lyrics(contents);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().lines.size() == 1);
+    CHECK(result.value().lines[0].text == "One hundred");
+    CHECK(result.value().lines[0].start_time.value() == 6000000);
+}
+
+TEST_CASE("parse_lrc_lyrics: variable-width minute with centiseconds [123:45.67]", "[lyrics][lrc][timestamp]")
+{
+    std::string contents = "[123:45.67]Long duration";
+    auto result = mvlab::parse_lrc_lyrics(contents);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().lines.size() == 1);
+    CHECK(result.value().lines[0].text == "Long duration");
+    mvlab::LyricTime expected = 123 * 60000 + 45 * 1000 + 670;
+    CHECK(result.value().lines[0].start_time.value() == expected);
+}
+
+TEST_CASE("parse_lrc_lyrics: missing minutes rejected", "[lyrics][lrc][timestamp]")
+{
+    std::string contents = "[:12]Invalid";
+    auto result = mvlab::parse_lrc_lyrics(contents);
+
+    CHECK(!result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::malformed_external_output);
+}
+
+TEST_CASE("parse_lrc_lyrics: invalid minutes with letter at start rejected", "[lyrics][lrc][timestamp]")
+{
+    std::string contents = "[a1:12]Invalid";
+    auto result = mvlab::parse_lrc_lyrics(contents);
+
+    CHECK(!result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::malformed_external_output);
+}
+
+TEST_CASE("parse_lrc_lyrics: invalid minutes with letter at end rejected", "[lyrics][lrc][timestamp]")
+{
+    std::string contents = "[1a:12]Invalid";
+    auto result = mvlab::parse_lrc_lyrics(contents);
+
+    CHECK(!result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::malformed_external_output);
+}
+
+TEST_CASE("parse_lrc_lyrics: invalid seconds width one digit rejected", "[lyrics][lrc][timestamp]")
+{
+    std::string contents = "[01:1]Invalid";
+    auto result = mvlab::parse_lrc_lyrics(contents);
+
+    CHECK(!result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::malformed_external_output);
+}
+
+TEST_CASE("parse_lrc_lyrics: invalid seconds width three digits rejected", "[lyrics][lrc][timestamp]")
+{
+    std::string contents = "[01:001]Invalid";
+    auto result = mvlab::parse_lrc_lyrics(contents);
+
+    CHECK(!result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::malformed_external_output);
+}
+
 TEST_CASE("parse_lrc_lyrics: centisecond precision [mm:ss.xx]", "[lyrics][lrc][timestamp]")
 {
     std::string contents = "[01:23.45]Lyric line";
