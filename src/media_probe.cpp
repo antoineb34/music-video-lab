@@ -574,7 +574,7 @@ Result<MediaProbeResult> parse_ffprobe_json(
 
 Result<MediaProbeResult> probe_media_file(
     const std::filesystem::path& path,
-    const MediaProbeOptions& options [[maybe_unused]])
+    const MediaProbeOptions& options)
 {
     // Validate path
     if (path.empty()) {
@@ -652,8 +652,9 @@ Result<MediaProbeResult> probe_media_file(
         close(stderr_pipe[1]);
 
         // Build argv
+        std::string ffprobe_path = options.ffprobe_executable.string();
         const char* argv[] = {
-            "ffprobe",
+            ffprobe_path.c_str(),
             "-v", "error",
             "-print_format", "json",
             "-show_format",
@@ -662,7 +663,7 @@ Result<MediaProbeResult> probe_media_file(
             nullptr
         };
 
-        execvp("ffprobe", (char* const*)argv);
+        execvp(ffprobe_path.c_str(), (char* const*)argv);
         _exit(kExecFailedExitCode);
     }
 

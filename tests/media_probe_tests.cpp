@@ -1,10 +1,79 @@
 #include "media_probe.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
+#include <fstream>
+#include <sys/stat.h>
 
 using namespace mvlab;
 
 namespace {
+
+// Helper: create a unique temporary directory for test files
+std::string create_temp_dir()
+{
+    // Create a temporary directory using mkdtemp pattern
+    std::string template_str = "/tmp/mvlab-media-probe-XXXXXX";
+    char* dir = mkdtemp(&template_str[0]);
+    if (!dir) {
+        throw std::runtime_error("Failed to create temporary directory");
+    }
+    return std::string(dir);
+}
+
+// Helper: create a fake ffprobe executable script that outputs given JSON
+std::filesystem::path create_fake_ffprobe(
+    const std::string& temp_dir,
+    const std::string& output_json,
+    int exit_code = 0,
+    const std::string& stderr_output = "")
+{
+    std::filesystem::path script_path = std::filesystem::path(temp_dir) / "ffprobe";
+
+    std::ofstream script(script_path);
+    script << "#!/bin/bash\n";
+
+    if (!stderr_output.empty()) {
+        // Escape the stderr output for shell safety
+        script << "echo '" << stderr_output << "' >&2\n";
+    }
+
+    if (!output_json.empty()) {
+        // Escape the JSON for shell safety
+        script << "cat << 'EOF'\n" << output_json << "\nEOF\n";
+    }
+
+    script << "exit " << exit_code << "\n";
+    script.close();
+
+    // Make it executable
+    chmod(script_path.c_str(), 0755);
+
+    return script_path;
+}
+
+// Helper: create a fake ffprobe that records all arguments
+std::filesystem::path create_arg_recording_ffprobe(
+    const std::string& temp_dir,
+    const std::string& arg_file)
+{
+    std::filesystem::path script_path = std::filesystem::path(temp_dir) / "ffprobe";
+
+    std::ofstream script(script_path);
+    script << "#!/bin/bash\n";
+    script << "# Record all arguments\n";
+    script << "{\n";
+    script << "  for arg in \"$@\"; do\n";
+    script << "    printf '%s\\n' \"$arg\"\n";
+    script << "  done\n";
+    script << "} > '" << arg_file << "'\n";
+    script << "echo '{\"format\": {}, \"streams\": []}'\n";
+    script << "exit 0\n";
+    script.close();
+
+    chmod(script_path.c_str(), 0755);
+
+    return script_path;
+}
 
 // Helper: create a minimal valid ffprobe JSON for audio only
 std::string audio_only_json()
@@ -695,4 +764,320 @@ TEST_CASE("Multiple video streams selects first valid", "[media_probe][edge_case
     auto result = parse_ffprobe_json("/tmp/test.mkv", json_str);
     REQUIRE(result);
     CHECK(result.value().video->width == 1280);
+}
+
+// ===== Process-facing tests =====
+
+TEST_CASE("Probe missing ffprobe executable", "[media_probe][process]")
+{
+    auto temp_dir = create_temp_dir();
+    std::filesystem::path nonexistent_exe = std::filesystem::path(temp_dir) / "nonexistent-ffprobe";
+
+    // Create a real media file
+    std::filesystem::path media_file = std::filesystem::path(temp_dir) / "test.mp4";
+    {
+        std::ofstream f(media_file);
+        f << "fake media content";
+    }
+
+    MediaProbeOptions options;
+    options.ffprobe_executable = nonexistent_exe;
+
+    auto result = probe_media_file(media_file, options);
+    REQUIRE(!result);
+    CHECK(result.error().code == ErrorCode::external_tool_unavailable);
+
+    // Cleanup
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("Probe fake ffprobe success with audio JSON", "[media_probe][process]")
+{
+    auto temp_dir = create_temp_dir();
+
+    // Create fake ffprobe that outputs valid audio JSON
+    auto ffprobe_exe = create_fake_ffprobe(temp_dir, audio_only_json());
+
+    // Create a real media file
+    std::filesystem::path media_file = std::filesystem::path(temp_dir) / "test.mp3";
+    {
+        std::ofstream f(media_file);
+        f << "fake audio content";
+    }
+
+    MediaProbeOptions options;
+    options.ffprobe_executable = ffprobe_exe;
+
+    auto result = probe_media_file(media_file, options);
+    REQUIRE(result);
+    CHECK(result.value().kind == ProbedMediaKind::audio);
+    REQUIRE(result.value().audio.has_value());
+    CHECK(result.value().audio->channels == 2);
+
+    // Cleanup
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("Probe fake ffprobe success with image JSON", "[media_probe][process]")
+{
+    auto temp_dir = create_temp_dir();
+
+    // Create fake ffprobe that outputs valid image JSON
+    auto ffprobe_exe = create_fake_ffprobe(temp_dir, image_json());
+
+    // Create a real media file
+    std::filesystem::path media_file = std::filesystem::path(temp_dir) / "test.png";
+    {
+        std::ofstream f(media_file);
+        f << "fake image content";
+    }
+
+    MediaProbeOptions options;
+    options.ffprobe_executable = ffprobe_exe;
+
+    auto result = probe_media_file(media_file, options);
+    REQUIRE(result);
+    CHECK(result.value().kind == ProbedMediaKind::image);
+
+    // Cleanup
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("Probe fake ffprobe exits nonzero", "[media_probe][process]")
+{
+    auto temp_dir = create_temp_dir();
+
+    // Create fake ffprobe that exits with code 1
+    auto ffprobe_exe = create_fake_ffprobe(temp_dir, "", 1, "Error processing file");
+
+    // Create a real media file
+    std::filesystem::path media_file = std::filesystem::path(temp_dir) / "test.mp4";
+    {
+        std::ofstream f(media_file);
+        f << "fake media content";
+    }
+
+    MediaProbeOptions options;
+    options.ffprobe_executable = ffprobe_exe;
+
+    auto result = probe_media_file(media_file, options);
+    REQUIRE(!result);
+    CHECK(result.error().code == ErrorCode::external_tool_failed);
+    REQUIRE(result.error().details.has_value());
+    CHECK(result.error().details->find("Error processing file") != std::string::npos);
+
+    // Cleanup
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("Probe fake ffprobe empty stdout rejected", "[media_probe][process]")
+{
+    auto temp_dir = create_temp_dir();
+
+    // Create fake ffprobe that produces empty stdout
+    auto ffprobe_exe = create_fake_ffprobe(temp_dir, "", 0);
+
+    // Create a real media file
+    std::filesystem::path media_file = std::filesystem::path(temp_dir) / "test.mp4";
+    {
+        std::ofstream f(media_file);
+        f << "fake media content";
+    }
+
+    MediaProbeOptions options;
+    options.ffprobe_executable = ffprobe_exe;
+
+    auto result = probe_media_file(media_file, options);
+    REQUIRE(!result);
+    CHECK(result.error().code == ErrorCode::invalid_media);
+
+    // Cleanup
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("Probe fake ffprobe malformed JSON", "[media_probe][process]")
+{
+    auto temp_dir = create_temp_dir();
+
+    // Create fake ffprobe that outputs invalid JSON
+    auto ffprobe_exe = create_fake_ffprobe(temp_dir, "{invalid json}", 0);
+
+    // Create a real media file
+    std::filesystem::path media_file = std::filesystem::path(temp_dir) / "test.mp4";
+    {
+        std::ofstream f(media_file);
+        f << "fake media content";
+    }
+
+    MediaProbeOptions options;
+    options.ffprobe_executable = ffprobe_exe;
+
+    auto result = probe_media_file(media_file, options);
+    REQUIRE(!result);
+    CHECK(result.error().code == ErrorCode::invalid_media);
+
+    // Cleanup
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("Probe stderr truncated to documented limit", "[media_probe][process]")
+{
+    auto temp_dir = create_temp_dir();
+
+    // Create stderr output larger than 256 bytes
+    std::string large_stderr(300, 'X');
+
+    // Create fake ffprobe that produces large stderr and exits nonzero
+    auto ffprobe_exe = create_fake_ffprobe(temp_dir, "", 1, large_stderr);
+
+    // Create a real media file
+    std::filesystem::path media_file = std::filesystem::path(temp_dir) / "test.mp4";
+    {
+        std::ofstream f(media_file);
+        f << "fake media content";
+    }
+
+    MediaProbeOptions options;
+    options.ffprobe_executable = ffprobe_exe;
+
+    auto result = probe_media_file(media_file, options);
+    REQUIRE(!result);
+    REQUIRE(result.error().details.has_value());
+
+    // Verify truncation: should have "..." suffix and be around 256 + 3 chars
+    const auto& details = result.error().details.value();
+    CHECK(details.find("...") != std::string::npos);
+    CHECK(details.length() <= 260);  // 256 + "..."
+
+    // Cleanup
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("Probe argument safety with special characters", "[media_probe][process]")
+{
+    auto temp_dir = create_temp_dir();
+
+    // Create a filename with special characters
+    std::string special_name = "test file 'quotes' $dollar [brackets] ; semicolon.mp4";
+    std::filesystem::path media_file = std::filesystem::path(temp_dir) / special_name;
+    {
+        std::ofstream f(media_file);
+        f << "fake media content";
+    }
+
+    // Create arg-recording fake ffprobe
+    std::string arg_file = std::filesystem::path(temp_dir).string() + "/args.txt";
+    auto ffprobe_exe = create_arg_recording_ffprobe(temp_dir, arg_file);
+
+    MediaProbeOptions options;
+    options.ffprobe_executable = ffprobe_exe;
+
+    auto result = probe_media_file(media_file, options);
+
+    // Read recorded arguments
+    std::ifstream args_in(arg_file);
+    std::vector<std::string> recorded_args;
+    std::string line;
+    while (std::getline(args_in, line)) {
+        recorded_args.push_back(line);
+    }
+
+    // Verify arguments
+    // Expected (after argv[0]): "-v", "error", "-print_format", "json", "-show_format", "-show_streams", media_file_path
+    // Bash $@ starts from argv[1], so we should have 7 arguments
+    REQUIRE(recorded_args.size() >= 7);
+
+    // The media path should be preserved exactly as the last argument
+    CHECK(recorded_args.back() == media_file.string());
+
+    // "-v" and "error" should be separate arguments
+    auto v_it = std::find(recorded_args.begin(), recorded_args.end(), "-v");
+    REQUIRE(v_it != recorded_args.end());
+    REQUIRE(std::next(v_it) != recorded_args.end());
+    CHECK(*std::next(v_it) == "error");
+
+    // Cleanup
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("Probe with trailing newline in JSON", "[media_probe][process]")
+{
+    auto temp_dir = create_temp_dir();
+
+    // Create fake ffprobe with trailing newline
+    std::string json_with_newline = audio_only_json() + "\n";
+    auto ffprobe_exe = create_fake_ffprobe(temp_dir, json_with_newline);
+
+    // Create a real media file
+    std::filesystem::path media_file = std::filesystem::path(temp_dir) / "test.mp3";
+    {
+        std::ofstream f(media_file);
+        f << "fake audio content";
+    }
+
+    MediaProbeOptions options;
+    options.ffprobe_executable = ffprobe_exe;
+
+    auto result = probe_media_file(media_file, options);
+    REQUIRE(result);
+    CHECK(result.value().kind == ProbedMediaKind::audio);
+
+    // Cleanup
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("Probe source path preserved in result", "[media_probe][process]")
+{
+    auto temp_dir = create_temp_dir();
+
+    // Create fake ffprobe
+    auto ffprobe_exe = create_fake_ffprobe(temp_dir, audio_only_json());
+
+    // Create a real media file with specific path
+    std::filesystem::path media_file = std::filesystem::path(temp_dir) / "my-audio.mp3";
+    {
+        std::ofstream f(media_file);
+        f << "fake audio content";
+    }
+
+    MediaProbeOptions options;
+    options.ffprobe_executable = ffprobe_exe;
+
+    auto result = probe_media_file(media_file, options);
+    REQUIRE(result);
+    CHECK(result.value().source_path == media_file);
+
+    // Cleanup
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("Probe repeated calls remain deterministic", "[media_probe][process]")
+{
+    auto temp_dir = create_temp_dir();
+
+    // Create fake ffprobe
+    auto ffprobe_exe = create_fake_ffprobe(temp_dir, audio_video_json());
+
+    // Create a real media file
+    std::filesystem::path media_file = std::filesystem::path(temp_dir) / "test.mkv";
+    {
+        std::ofstream f(media_file);
+        f << "fake media content";
+    }
+
+    MediaProbeOptions options;
+    options.ffprobe_executable = ffprobe_exe;
+
+    auto result1 = probe_media_file(media_file, options);
+    auto result2 = probe_media_file(media_file, options);
+
+    REQUIRE(result1);
+    REQUIRE(result2);
+    CHECK(result1.value().kind == result2.value().kind);
+    REQUIRE(result1.value().audio.has_value());
+    REQUIRE(result2.value().audio.has_value());
+    CHECK(result1.value().audio->channels == result2.value().audio->channels);
+
+    // Cleanup
+    std::filesystem::remove_all(temp_dir);
 }
