@@ -11,12 +11,16 @@
 
 ## Current project stage
 
-The project has completed foundational audio inspection and project persistence subsystems.
+The project has completed foundational audio inspection, project persistence, and
+a runtime foundation (typed errors, results, logging, CLI diagnostics, exit codes)
+that all current subsystems are built on.
 
 Current scope:
 
 - One executable (`mvlab`)
 - CLI11-based command dispatcher
+- Runtime foundation: typed `Error`/`Result<T>`, a configurable `Logger`, and a
+  stable `ErrorCode` -> exit code policy (see "Runtime error and logging policy" below)
 - Audio subsystem: `audio inspect` (ffprobe-based), `audio analyze` (PCM analysis)
 - Project subsystem: `project create`, `project info` with JSON persistence
 - Unit and integration tests using Catch2
@@ -33,17 +37,23 @@ Planned subsystems:
 
 ### Production source code
 
-- `src/main.cpp` — CLI11 application setup and command dispatch; no process management, parsing, or project logic
+- `src/main.cpp` — CLI11 application setup, command dispatch, logging-flag wiring, and all stdout/stderr formatting + exit-code mapping; no process management, parsing, filesystem, or project logic
+- `src/error.hpp` / `src/error.cpp` — `ErrorCode`, `Error`, and the `ErrorCode` -> exit code mapping (`exit_code_for`)
+- `src/result.hpp` — `Result<T>` / `Result<void>`, the typed success-or-`Error` return type used across `mvlab_core`
+- `src/logger.hpp` / `src/logger.cpp` — Thread-safe `Logger` singleton (error/warning/info/debug, swappable sink, default stderr)
 - `src/audio_inspector.hpp` — Public interface for audio inspection (minimal header)
 - `src/audio_inspector.cpp` — Audio file inspection implementation using ffprobe subprocess, POSIX process primitives, and output parsing
 - `src/audio_analyzer.hpp` — Public interface for audio PCM analysis
 - `src/audio_analyzer.cpp` — Audio PCM analysis implementation using ffmpeg subprocess for decoding
-- `src/project_model.hpp` — Data structures for project persistence (Project, Audio, Background, Lyrics, ExportSettings)
-- `src/project_model.cpp` — Project CRUD operations and validation logic
+- `src/project_model.hpp` — Data structures for project persistence (Project, Audio, Background, Lyrics, ExportSettings) and `create_project_on_disk()`'s `ProjectPaths`
+- `src/project_model.cpp` — Project CRUD operations, validation logic, and `.mvlab` folder-structure creation
 
 ### Test files
 
-- `tests/smoke_tests.cpp` — CLI integration tests (no dependency on real audio files)
+- `tests/smoke_tests.cpp` — CLI integration tests (no dependency on real audio files); also covers logging flags and exit codes end-to-end
+- `tests/error_tests.cpp` — `ErrorCode`/`Error`/`exit_code_for` coverage
+- `tests/result_tests.cpp` — `Result<T>`/`Result<void>` coverage
+- `tests/logger_tests.cpp` — `Logger` level filtering, sink capture, formatting, and concurrency coverage
 - `tests/audio_inspector_tests.cpp` — Unit tests for `mvlab::inspect_audio()` with temporary generated test audio files
 - `tests/audio_analyzer_tests.cpp` — Unit tests for `mvlab::analyze_audio()` with temporary generated test audio files
 - `tests/project_model_tests.cpp` — Unit tests for project model serialization, validation, and CRUD operations
@@ -64,6 +74,42 @@ Audio inspection is Linux/Fedora-specific and uses POSIX primitives:
 - `waitpid()` for process synchronization
 
 This is not portable to Windows. Refactoring to use platform-neutral process APIs is future work.
+
+## Runtime error and logging policy
+
+All `mvlab_core` functions that can fail in an expected way (bad input, missing
+file, external tool problems, malformed data) return `Result<T>` /
+`Result<void>` (see `src/result.hpp`) carrying a typed `Error` (see
+`src/error.hpp`) on failure. This is required, not optional, for any new core
+function with expected failure modes — do not reintroduce bespoke
+`std::pair<T, std::string>` or bare-string error conventions.
+
+- **Typed errors are required for expected core failures.** Pick the most
+  specific `ErrorCode` that fits; add a new one only with a clear reason.
+- **Technical diagnostics belong in `Error::details`**, not in `Error::message`.
+  `message` is concise and safe to show by default; `details` holds ffprobe/
+  ffmpeg stderr, JSON parser output, filesystem exception text, etc.
+- **Core code does not directly print user-facing output.** No `std::cout`/
+  `std::cerr` in `mvlab_core`. `main.cpp` owns all stdout/stderr formatting
+  and exit-code mapping (see `unwrap_or_exit()` / `report_error()`).
+- **Logging does not replace error propagation.** A failure must still return
+  a `Result` with an `Error`; `Logger` calls are a supplementary diagnostic
+  trail, never the only signal that something failed. Avoid logging inside
+  tight loops or large buffers (PCM samples, waveform arrays, lyrics text).
+- **stdout is for command results; stderr is for logs and errors.** Logger's
+  default sink writes to stderr. `report_error()` in `main.cpp` is the only
+  place a failed `Result` is turned into user-facing text, so it never
+  duplicates what the logger already printed.
+- **Logging levels** (`--quiet` / default / `--verbose` / `--debug` map to
+  `LogLevel::error` / `warning` / `info` / `debug` respectively): the three
+  flags are mutually exclusive. Default output hides `Error::details`;
+  `--verbose` and `--debug` reveal it via an additional `Details:` line.
+- **Exit codes are stable and centralized in `exit_code_for()`**
+  (`src/error.hpp`/`.cpp`): `0` success, `2` invalid argument, `3` file/path/
+  permission problem, `4` external tool problem, `5` malformed/unsupported
+  data, `10` internal failure. CLI11's own parse-error exit codes (missing
+  required arguments, unknown options, `--help`/`--version`) are unaffected
+  by this mapping.
 
 ## Build and test commands
 
