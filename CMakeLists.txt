@@ -43,7 +43,9 @@ add_library(mvlab_core STATIC
     src/project_model.cpp
     src/media_asset.cpp
     src/timeline.cpp
+    src/timeline_serialization.cpp
     src/lyrics.cpp
+    src/text_presentation.cpp
 )
 
 target_include_directories(mvlab_core PUBLIC
@@ -88,7 +90,9 @@ add_executable(
     tests/project_model_tests.cpp
     tests/media_asset_tests.cpp
     tests/timeline_tests.cpp
+    tests/timeline_serialization_tests.cpp
     tests/lyrics_tests.cpp
+    tests/text_presentation_tests.cpp
 )
 
 target_link_libraries(mvlab_tests PRIVATE
