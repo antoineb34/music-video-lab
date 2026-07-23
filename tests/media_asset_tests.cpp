@@ -1403,3 +1403,293 @@ TEST_CASE("Media asset import: no asset remains after rollback", "[media_asset]"
     std::filesystem::remove(source);
     std::filesystem::remove_all(project_root);
 }
+
+// Media asset removal: successful removals
+TEST_CASE("Media asset removal: successful audio removal", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_1";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto imported = mvlab::import_media_asset(project, project_root, source).value();
+    CHECK(project.assets.size() == 1);
+
+    auto removed = mvlab::remove_media_asset(project, project_root, imported.id);
+    REQUIRE(removed.has_value());
+    CHECK(removed.value().id == imported.id);
+    CHECK(removed.value().type == mvlab::MediaAssetType::audio);
+    CHECK(project.assets.empty());
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset removal: successful image removal", "[media_asset]")
+{
+    auto source = create_temp_file(".png");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_2";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto imported = mvlab::import_media_asset(project, project_root, source).value();
+
+    auto removed = mvlab::remove_media_asset(project, project_root, imported.id);
+    REQUIRE(removed.has_value());
+    CHECK(removed.value().type == mvlab::MediaAssetType::image);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset removal: successful video removal", "[media_asset]")
+{
+    auto source = create_temp_file(".mp4");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_3";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto imported = mvlab::import_media_asset(project, project_root, source).value();
+
+    auto removed = mvlab::remove_media_asset(project, project_root, imported.id);
+    REQUIRE(removed.has_value());
+    CHECK(removed.value().type == mvlab::MediaAssetType::video);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset removal: asset removed from Project::assets", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_4";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto imported = mvlab::import_media_asset(project, project_root, source).value();
+    CHECK(project.assets.size() == 1);
+
+    mvlab::remove_media_asset(project, project_root, imported.id);
+    CHECK(project.assets.empty());
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset removal: managed file deleted", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_5";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto imported = mvlab::import_media_asset(project, project_root, source).value();
+
+    auto managed_path = project_root / imported.relative_path;
+    REQUIRE(std::filesystem::exists(managed_path));
+
+    mvlab::remove_media_asset(project, project_root, imported.id);
+    CHECK_FALSE(std::filesystem::exists(managed_path));
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset removal: saved project no longer contains asset", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_6";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto imported = mvlab::import_media_asset(project, project_root, source).value();
+
+    mvlab::remove_media_asset(project, project_root, imported.id);
+
+    auto project_file = project_root / "project.json";
+    auto loaded = mvlab::load_project(project_file.string());
+    REQUIRE(loaded.has_value());
+    CHECK(loaded.value().assets.empty());
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset removal: other assets untouched", "[media_asset]")
+{
+    auto source1 = create_temp_file(".mp3");
+    auto source2 = create_temp_file(".png");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_7";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto imported1 = mvlab::import_media_asset(project, project_root, source1).value();
+    auto imported2 = mvlab::import_media_asset(project, project_root, source2).value();
+    CHECK(project.assets.size() == 2);
+
+    mvlab::remove_media_asset(project, project_root, imported1.id);
+    CHECK(project.assets.size() == 1);
+    CHECK(project.assets[0].id == imported2.id);
+
+    std::filesystem::remove(source1);
+    std::filesystem::remove(source2);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset removal: stale asset with missing file removed successfully", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_8";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto imported = mvlab::import_media_asset(project, project_root, source).value();
+
+    // Delete the managed file manually to create a stale record
+    auto managed_path = project_root / imported.relative_path;
+    std::filesystem::remove(managed_path);
+
+    auto result = mvlab::remove_media_asset(project, project_root, imported.id);
+    REQUIRE(result.has_value());
+    CHECK(project.assets.empty());
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+// Media asset removal: failure and rollback
+TEST_CASE("Media asset removal: empty project root rejected", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::remove_media_asset(project, "", "asset-1");
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
+}
+
+TEST_CASE("Media asset removal: missing project root rejected", "[media_asset]")
+{
+    auto nonexistent = std::filesystem::temp_directory_path() / "mvlab_nonexistent_remove";
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::remove_media_asset(project, nonexistent, "asset-1");
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::file_not_found);
+}
+
+TEST_CASE("Media asset removal: project root as regular file rejected", "[media_asset]")
+{
+    auto file_path = std::filesystem::temp_directory_path() / "mvlab_not_a_dir_remove";
+    std::ofstream f(file_path);
+    f << "not a directory";
+    f.close();
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::remove_media_asset(project, file_path, "asset-1");
+
+    std::filesystem::remove(file_path);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::filesystem_error);
+}
+
+TEST_CASE("Media asset removal: empty asset ID rejected", "[media_asset]")
+{
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_9";
+    std::filesystem::create_directory(project_root);
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::remove_media_asset(project, project_root, "");
+
+    std::filesystem::remove_all(project_root);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
+}
+
+TEST_CASE("Media asset removal: unknown asset ID rejected", "[media_asset]")
+{
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_10";
+    std::filesystem::create_directory(project_root);
+
+    auto project = mvlab::create_project("Test").value();
+    auto result = mvlab::remove_media_asset(project, project_root, "asset-999");
+
+    std::filesystem::remove_all(project_root);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::file_not_found);
+}
+
+TEST_CASE("Media asset removal: unsafe path with .. rejected", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_11";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto imported = mvlab::import_media_asset(project, project_root, source).value();
+
+    // Manually corrupt the asset path to include ..
+    // The project validation will catch this as malformed_project
+    project.assets[0].relative_path = std::filesystem::path("media/../../../etc/passwd");
+
+    auto result = mvlab::remove_media_asset(project, project_root, imported.id);
+    REQUIRE_FALSE(result.has_value());
+    // Project validation fails because asset path has ".."
+    CHECK(result.error().code == mvlab::ErrorCode::malformed_project);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset removal: path outside media/ rejected", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_12";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto imported = mvlab::import_media_asset(project, project_root, source).value();
+
+    // Corrupt the asset path
+    project.assets[0].relative_path = std::filesystem::path("song.mp3");
+
+    auto result = mvlab::remove_media_asset(project, project_root, imported.id);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}
+
+TEST_CASE("Media asset removal: project unchanged on failure", "[media_asset]")
+{
+    auto source = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_remove_13";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto project = mvlab::create_project("Test").value();
+    auto imported = mvlab::import_media_asset(project, project_root, source).value();
+    size_t original_count = project.assets.size();
+
+    // Try to remove unknown asset
+    auto result = mvlab::remove_media_asset(project, project_root, "asset-999");
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(project.assets.size() == original_count);
+
+    std::filesystem::remove(source);
+    std::filesystem::remove_all(project_root);
+}

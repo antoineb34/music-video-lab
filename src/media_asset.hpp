@@ -129,6 +129,22 @@ Result<MediaAsset> import_media_asset(
     const std::filesystem::path& source_path
 );
 
+// Removes a media asset from an existing project with transaction safety.
+// On success: asset is removed from Project::assets, project.json is updated, and the
+// managed media file is deleted. The removed asset is returned.
+// On failure: Project is unchanged, project.json is restored if needed, and the
+// managed file is not deleted.
+// Returns invalid_argument for empty project root or asset ID, or for unsafe paths.
+// Returns file_not_found for missing project root or unknown asset ID.
+// Returns filesystem_error for project root not being a directory or save/delete failures.
+// Returns malformed_project if the existing project is invalid.
+// If the managed file is missing, the asset record is removed successfully (preferred behavior).
+Result<MediaAsset> remove_media_asset(
+    Project& project,
+    const std::filesystem::path& project_root,
+    const AssetId& asset_id
+);
+
 } // namespace mvlab
 
 #endif // MVLAB_MEDIA_ASSET_HPP

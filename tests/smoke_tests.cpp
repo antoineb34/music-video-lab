@@ -419,6 +419,85 @@ TEST_CASE("project asset info with unknown asset", "[project][asset]")
     std::system("rm -rf /tmp/mvlab_cli_asset_test_8");
 }
 
+// Media asset removal CLI tests
+TEST_CASE("project asset remove help text is present", "[project][asset]")
+{
+    std::string out = run_mvlab("project asset remove --help");
+    bool has_remove = (out.find("Remove") != std::string::npos) || (out.find("remove") != std::string::npos);
+    CHECK(has_remove);
+}
+
+TEST_CASE("project asset remove without arguments is rejected", "[project][asset]")
+{
+    std::string out = run_mvlab("project asset remove");
+    CHECK(out.find("required") != std::string::npos);
+}
+
+TEST_CASE("project asset remove with successful removal", "[project][asset]")
+{
+    std::system("rm -rf /tmp/mvlab_cli_asset_remove_1");
+    std::system("./mvlab project create /tmp/mvlab_cli_asset_remove_1 --name TestProject 2>/dev/null");
+    std::system("printf 'fake audio' > /tmp/mvlab_cli_asset_remove_1_src.mp3");
+    std::system("./mvlab project asset import /tmp/mvlab_cli_asset_remove_1/mvlab_cli_asset_remove_1.mvlab /tmp/mvlab_cli_asset_remove_1_src.mp3 2>/dev/null");
+
+    auto out = run_mvlab_full("project asset remove /tmp/mvlab_cli_asset_remove_1/mvlab_cli_asset_remove_1.mvlab asset-1");
+    CHECK(out.exit_code == 0);
+    CHECK(out.text.find("Removed asset") != std::string::npos);
+    CHECK(out.text.find("asset-1") != std::string::npos);
+    CHECK(out.text.find("audio") != std::string::npos);
+
+    std::system("rm -rf /tmp/mvlab_cli_asset_remove_1");
+    std::system("rm -f /tmp/mvlab_cli_asset_remove_1_src.mp3");
+}
+
+TEST_CASE("project asset remove with unknown asset fails", "[project][asset]")
+{
+    std::system("rm -rf /tmp/mvlab_cli_asset_remove_2");
+    std::system("./mvlab project create /tmp/mvlab_cli_asset_remove_2 --name TestProject 2>/dev/null");
+
+    auto out = run_mvlab_full("project asset remove /tmp/mvlab_cli_asset_remove_2/mvlab_cli_asset_remove_2.mvlab asset-999");
+    CHECK(out.exit_code == 3);  // file_not_found = 3
+    CHECK(out.text.find("Error") != std::string::npos);
+
+    std::system("rm -rf /tmp/mvlab_cli_asset_remove_2");
+}
+
+TEST_CASE("project asset remove asset no longer in list", "[project][asset]")
+{
+    std::system("rm -rf /tmp/mvlab_cli_asset_remove_3");
+    std::system("./mvlab project create /tmp/mvlab_cli_asset_remove_3 --name TestProject 2>/dev/null");
+    std::system("printf 'fake audio' > /tmp/mvlab_cli_asset_remove_3_src.mp3");
+    std::system("./mvlab project asset import /tmp/mvlab_cli_asset_remove_3/mvlab_cli_asset_remove_3.mvlab /tmp/mvlab_cli_asset_remove_3_src.mp3 2>/dev/null");
+
+    auto list_before = run_mvlab_full("project asset list /tmp/mvlab_cli_asset_remove_3/mvlab_cli_asset_remove_3.mvlab");
+    CHECK(list_before.text.find("Assets: 1") != std::string::npos);
+
+    std::system("./mvlab project asset remove /tmp/mvlab_cli_asset_remove_3/mvlab_cli_asset_remove_3.mvlab asset-1 2>/dev/null");
+
+    auto list_after = run_mvlab_full("project asset list /tmp/mvlab_cli_asset_remove_3/mvlab_cli_asset_remove_3.mvlab");
+    CHECK(list_after.text.find("Assets: 0") != std::string::npos);
+
+    std::system("rm -rf /tmp/mvlab_cli_asset_remove_3");
+    std::system("rm -f /tmp/mvlab_cli_asset_remove_3_src.mp3");
+}
+
+TEST_CASE("project asset remove asset info returns error afterward", "[project][asset]")
+{
+    std::system("rm -rf /tmp/mvlab_cli_asset_remove_4");
+    std::system("./mvlab project create /tmp/mvlab_cli_asset_remove_4 --name TestProject 2>/dev/null");
+    std::system("printf 'fake audio' > /tmp/mvlab_cli_asset_remove_4_src.mp3");
+    std::system("./mvlab project asset import /tmp/mvlab_cli_asset_remove_4/mvlab_cli_asset_remove_4.mvlab /tmp/mvlab_cli_asset_remove_4_src.mp3 2>/dev/null");
+
+    std::system("./mvlab project asset remove /tmp/mvlab_cli_asset_remove_4/mvlab_cli_asset_remove_4.mvlab asset-1 2>/dev/null");
+
+    auto out = run_mvlab_full("project asset info /tmp/mvlab_cli_asset_remove_4/mvlab_cli_asset_remove_4.mvlab asset-1");
+    CHECK(out.exit_code == 3);  // file_not_found = 3
+    CHECK(out.text.find("Error") != std::string::npos);
+
+    std::system("rm -rf /tmp/mvlab_cli_asset_remove_4");
+    std::system("rm -f /tmp/mvlab_cli_asset_remove_4_src.mp3");
+}
+
 TEST_CASE("CLI successful command exits 0 with unchanged output", "[cli][exit-code]")
 {
     std::string cmd = "ffmpeg -f lavfi -i anullsrc=r=48000:cl=stereo -t 0.3 -q:a 9 /tmp/mvlab_cli_success.wav -loglevel error -y 2>/dev/null";

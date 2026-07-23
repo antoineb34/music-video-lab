@@ -271,6 +271,28 @@ int main(int argc, char** argv)
         std::cout << "Size:          " << asset_ptr->file_size << " bytes\n";
     });
 
+    // Asset remove command
+    auto* remove_asset_cmd = asset_cmd->add_subcommand("remove", "Remove a media asset from a project");
+    std::string remove_asset_project;
+    std::string remove_asset_id;
+    remove_asset_cmd->add_option("project", remove_asset_project, "Project folder or project.json file")->required();
+    remove_asset_cmd->add_option("asset-id", remove_asset_id, "Asset ID")->required();
+
+    remove_asset_cmd->callback([&remove_asset_project, &remove_asset_id]() {
+        std::filesystem::path project_file = resolve_project_path(remove_asset_project);
+        std::filesystem::path project_root = project_file.parent_path();
+
+        auto project = unwrap_or_exit(mvlab::load_project(project_file.string()));
+        auto removed = unwrap_or_exit(mvlab::remove_media_asset(project, project_root, remove_asset_id));
+
+        std::cout << "Removed asset\n";
+        std::cout << "ID:            " << removed.id << "\n";
+        std::cout << "Type:          " << mvlab::to_string(removed.type) << "\n";
+        std::cout << "Display name:  " << removed.display_name << "\n";
+        std::cout << "Path:          " << removed.relative_path.string() << "\n";
+        std::cout << "Size:          " << removed.file_size << " bytes\n";
+    });
+
     try {
         CLI11_PARSE(app, argc, argv);
     } catch (const CLI::ParseError& e) {

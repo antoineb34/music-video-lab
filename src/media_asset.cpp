@@ -615,4 +615,225 @@ Result<MediaAsset> import_media_asset(
     return imported_asset;
 }
 
+Result<MediaAsset> remove_media_asset(
+    Project& project,
+    const std::filesystem::path& project_root,
+    const AssetId& asset_id
+)
+{
+    // Step 1: Validate inputs
+    if (project_root.empty()) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Project root path cannot be empty",
+            std::nullopt
+        };
+    }
+
+    if (asset_id.empty()) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Asset ID cannot be empty",
+            std::nullopt
+        };
+    }
+
+    // Step 2: Validate project root exists and is a directory
+    std::error_code ec;
+    if (!std::filesystem::exists(project_root, ec)) {
+        if (ec) {
+            return Error{
+                ErrorCode::filesystem_error,
+                "Failed to check if project root exists: " + project_root.string(),
+                ec.message()
+            };
+        }
+        return Error{
+            ErrorCode::file_not_found,
+            "Project root not found: " + project_root.string(),
+            std::nullopt
+        };
+    }
+
+    if (!std::filesystem::is_directory(project_root, ec)) {
+        if (ec) {
+            return Error{
+                ErrorCode::filesystem_error,
+                "Failed to check if project root is a directory: " + project_root.string(),
+                ec.message()
+            };
+        }
+        return Error{
+            ErrorCode::filesystem_error,
+            "Project root is not a directory: " + project_root.string(),
+            std::nullopt
+        };
+    }
+
+    // Step 3: Validate the existing project
+    auto project_validation = validate_project(project);
+    if (!project_validation) {
+        return Error{
+            ErrorCode::malformed_project,
+            project_validation.error().message,
+            project_validation.error().details
+        };
+    }
+
+    // Step 4: Find the asset in the project
+    auto asset_result = find_media_asset(project, asset_id);
+    if (!asset_result) {
+        return asset_result.error();
+    }
+    const MediaAsset& asset_to_remove = *asset_result.value();
+
+    // Step 5: Validate the asset path
+    if (asset_to_remove.relative_path.is_absolute()) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Asset path must be relative, not absolute: " + asset_to_remove.relative_path.string(),
+            std::nullopt
+        };
+    }
+
+    // Check for ".." path traversal
+    for (const auto& component : asset_to_remove.relative_path) {
+        if (component == "..") {
+            return Error{
+                ErrorCode::invalid_argument,
+                "Asset path must not contain '..' path traversal: " + asset_to_remove.relative_path.string(),
+                std::nullopt
+            };
+        }
+    }
+
+    // Check that path begins with media/
+    auto relative_str = asset_to_remove.relative_path.string();
+    if (relative_str.find("media/") != 0 && relative_str.find("media\\") != 0) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Asset path must be under media/: " + relative_str,
+            std::nullopt
+        };
+    }
+
+    // Step 6: Resolve the absolute path and verify it's inside media/
+    auto absolute_asset_path = project_root / asset_to_remove.relative_path;
+    auto media_dir = project_root / "media";
+
+    try {
+        auto canonical_asset = std::filesystem::canonical(absolute_asset_path.parent_path());
+        auto canonical_media = std::filesystem::canonical(media_dir);
+
+        // Check if the asset's parent is under media/
+        auto rel_path = std::filesystem::relative(canonical_asset, canonical_media);
+        for (const auto& component : rel_path) {
+            if (component == "..") {
+                return Error{
+                    ErrorCode::invalid_argument,
+                    "Asset path resolves outside media directory: " + asset_to_remove.relative_path.string(),
+                    std::nullopt
+                };
+            }
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        // If canonical fails, just check that the path starts with media_dir
+        // This is safer for paths that don't exist yet
+        try {
+            auto normalized = std::filesystem::weakly_canonical(absolute_asset_path);
+            if (normalized.string().find(media_dir.string()) != 0) {
+                return Error{
+                    ErrorCode::invalid_argument,
+                    "Asset path resolves outside media directory: " + asset_to_remove.relative_path.string(),
+                    std::nullopt
+                };
+            }
+        } catch (...) {
+            return Error{
+                ErrorCode::filesystem_error,
+                "Failed to validate asset path: " + asset_to_remove.relative_path.string(),
+                e.what()
+            };
+        }
+    }
+
+    // Step 7: Make a copy of the asset before modifying project
+    MediaAsset removed_asset = asset_to_remove;
+
+    // Step 8: Create updated project without the asset
+    Project updated = project;
+    auto it = std::find_if(updated.assets.begin(), updated.assets.end(),
+        [&asset_id](const MediaAsset& a) { return a.id == asset_id; });
+    if (it != updated.assets.end()) {
+        updated.assets.erase(it);
+    }
+
+    // Step 9: Validate updated project
+    auto updated_validation = validate_project(updated);
+    if (!updated_validation) {
+        return Error{
+            ErrorCode::invalid_argument,
+            updated_validation.error().message,
+            updated_validation.error().details
+        };
+    }
+
+    // Step 10: Save updated project before deleting the file
+    auto project_file = project_root / "project.json";
+    auto save_result = save_project(updated, project_file.string());
+    if (!save_result) {
+        return Error{
+            ErrorCode::filesystem_error,
+            save_result.error().message,
+            save_result.error().details
+        };
+    }
+
+    // Step 11: Delete the managed file (if it exists)
+    // If file doesn't exist, that's okay - we treat stale asset records as successfully removed
+    if (std::filesystem::exists(absolute_asset_path, ec)) {
+        // Check that it's a regular file (not a directory)
+        if (!std::filesystem::is_regular_file(absolute_asset_path, ec)) {
+            // Restore original project file
+            auto restore_result = save_project(project, project_file.string());
+            std::string restore_msg;
+            if (!restore_result) {
+                restore_msg = "; restoration failed: " + restore_result.error().message;
+            }
+
+            return Error{
+                ErrorCode::invalid_argument,
+                "Asset path is not a regular file (may be directory): " + absolute_asset_path.string(),
+                restore_msg
+            };
+        }
+
+        // Try to delete the file
+        try {
+            std::filesystem::remove(absolute_asset_path);
+        } catch (const std::filesystem::filesystem_error& e) {
+            // Restore original project file
+            auto restore_result = save_project(project, project_file.string());
+            std::string restore_msg;
+            if (!restore_result) {
+                restore_msg = "; restoration failed: " + restore_result.error().message;
+            } else {
+                restore_msg = "; original project.json restored";
+            }
+
+            return Error{
+                ErrorCode::filesystem_error,
+                "Failed to delete asset file: " + absolute_asset_path.string(),
+                std::string(e.what()) + restore_msg
+            };
+        }
+    }
+
+    // Step 12: Update the caller's project only after all operations succeeded
+    project = std::move(updated);
+
+    // Step 13: Return the removed asset
+    return removed_asset;
+}
+
 } // namespace mvlab
