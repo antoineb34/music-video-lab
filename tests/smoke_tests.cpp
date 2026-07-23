@@ -248,6 +248,177 @@ TEST_CASE("CLI exit code for malformed project data is 5", "[cli][exit-code]")
     std::system("rm -rf /tmp/mvlab_cli_malformed_exitcode");
 }
 
+// Media asset CLI tests
+TEST_CASE("project asset help text is present", "[project][asset]")
+{
+    std::string out = run_mvlab("project asset --help");
+    bool has_asset = out.find("asset") != std::string::npos;
+    CHECK(has_asset);
+}
+
+TEST_CASE("project asset import help text is present", "[project][asset]")
+{
+    std::string out = run_mvlab("project asset import --help");
+    bool has_import = (out.find("Import") != std::string::npos) || (out.find("import") != std::string::npos);
+    CHECK(has_import);
+}
+
+TEST_CASE("project asset list help text is present", "[project][asset]")
+{
+    std::string out = run_mvlab("project asset list --help");
+    bool has_list = (out.find("List") != std::string::npos) || (out.find("list") != std::string::npos);
+    CHECK(has_list);
+}
+
+TEST_CASE("project asset info help text is present", "[project][asset]")
+{
+    std::string out = run_mvlab("project asset info --help");
+    bool has_display = (out.find("Display") != std::string::npos) || (out.find("display") != std::string::npos);
+    CHECK(has_display);
+}
+
+TEST_CASE("project asset import without arguments is rejected", "[project][asset]")
+{
+    std::string out = run_mvlab("project asset import");
+    CHECK(out.find("required") != std::string::npos);
+}
+
+TEST_CASE("project asset list without arguments is rejected", "[project][asset]")
+{
+    std::string out = run_mvlab("project asset list");
+    CHECK(out.find("required") != std::string::npos);
+}
+
+TEST_CASE("project asset info without arguments is rejected", "[project][asset]")
+{
+    std::string out = run_mvlab("project asset info");
+    CHECK(out.find("required") != std::string::npos);
+}
+
+TEST_CASE("project asset import with missing project fails", "[project][asset]")
+{
+    std::string source = "/tmp/mvlab_test_source_nonexistent.mp3";
+    auto out = run_mvlab_full("project asset import /tmp/mvlab_nonexistent_proj " + source);
+    CHECK(out.exit_code != 0);
+}
+
+TEST_CASE("project asset import with unsupported format fails", "[project][asset]")
+{
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_1");
+    std::system("./mvlab project create /tmp/mvlab_cli_asset_test_1 --name TestProject 2>/dev/null");
+    std::system("printf 'test' > /tmp/mvlab_cli_asset_test_1_src.txt");
+
+    auto out = run_mvlab_full("project asset import /tmp/mvlab_cli_asset_test_1/mvlab_cli_asset_test_1.mvlab /tmp/mvlab_cli_asset_test_1_src.txt");
+    CHECK(out.exit_code == 5);  // unsupported_format = 5
+    CHECK(out.text.find("Error") != std::string::npos);
+
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_1");
+    std::system("rm -f /tmp/mvlab_cli_asset_test_1_src.txt");
+}
+
+TEST_CASE("project asset import with successful audio import", "[project][asset]")
+{
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_2");
+    std::system("./mvlab project create /tmp/mvlab_cli_asset_test_2 --name TestProject 2>/dev/null");
+    std::system("printf 'fake audio content' > /tmp/mvlab_cli_asset_test_2_src.mp3");
+
+    auto out = run_mvlab_full("project asset import /tmp/mvlab_cli_asset_test_2/mvlab_cli_asset_test_2.mvlab /tmp/mvlab_cli_asset_test_2_src.mp3");
+    CHECK(out.exit_code == 0);
+    CHECK(out.text.find("Imported asset") != std::string::npos);
+    CHECK(out.text.find("asset-1") != std::string::npos);
+    CHECK(out.text.find("audio") != std::string::npos);
+    CHECK(out.text.find("bytes") != std::string::npos);
+
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_2");
+    std::system("rm -f /tmp/mvlab_cli_asset_test_2_src.mp3");
+}
+
+TEST_CASE("project asset import with successful image import", "[project][asset]")
+{
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_3");
+    std::system("./mvlab project create /tmp/mvlab_cli_asset_test_3 --name TestProject 2>/dev/null");
+    std::system("printf 'fake image content' > /tmp/mvlab_cli_asset_test_3_src.png");
+
+    auto out = run_mvlab_full("project asset import /tmp/mvlab_cli_asset_test_3/mvlab_cli_asset_test_3.mvlab /tmp/mvlab_cli_asset_test_3_src.png");
+    CHECK(out.exit_code == 0);
+    CHECK(out.text.find("image") != std::string::npos);
+
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_3");
+    std::system("rm -f /tmp/mvlab_cli_asset_test_3_src.png");
+}
+
+TEST_CASE("project asset import with project directory form", "[project][asset]")
+{
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_4");
+    std::system("./mvlab project create /tmp/mvlab_cli_asset_test_4 --name TestProject 2>/dev/null");
+    std::system("printf 'fake video content' > /tmp/mvlab_cli_asset_test_4_src.mp4");
+
+    auto out = run_mvlab_full("project asset import /tmp/mvlab_cli_asset_test_4/mvlab_cli_asset_test_4.mvlab /tmp/mvlab_cli_asset_test_4_src.mp4");
+    CHECK(out.exit_code == 0);
+    CHECK(out.text.find("video") != std::string::npos);
+
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_4");
+    std::system("rm -f /tmp/mvlab_cli_asset_test_4_src.mp4");
+}
+
+TEST_CASE("project asset list with empty project", "[project][asset]")
+{
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_5");
+    std::system("./mvlab project create /tmp/mvlab_cli_asset_test_5 --name TestProject 2>/dev/null");
+
+    auto out = run_mvlab_full("project asset list /tmp/mvlab_cli_asset_test_5/mvlab_cli_asset_test_5.mvlab");
+    CHECK(out.exit_code == 0);
+    CHECK(out.text.find("Assets: 0") != std::string::npos);
+
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_5");
+}
+
+TEST_CASE("project asset list with one asset", "[project][asset]")
+{
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_6");
+    std::system("./mvlab project create /tmp/mvlab_cli_asset_test_6 --name TestProject 2>/dev/null");
+    std::system("printf 'fake audio' > /tmp/mvlab_cli_asset_test_6_src.mp3");
+    std::system("./mvlab project asset import /tmp/mvlab_cli_asset_test_6/mvlab_cli_asset_test_6.mvlab /tmp/mvlab_cli_asset_test_6_src.mp3 2>/dev/null");
+
+    auto out = run_mvlab_full("project asset list /tmp/mvlab_cli_asset_test_6/mvlab_cli_asset_test_6.mvlab");
+    CHECK(out.exit_code == 0);
+    CHECK(out.text.find("Assets: 1") != std::string::npos);
+    CHECK(out.text.find("asset-1") != std::string::npos);
+    CHECK(out.text.find("audio") != std::string::npos);
+
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_6");
+    std::system("rm -f /tmp/mvlab_cli_asset_test_6_src.mp3");
+}
+
+TEST_CASE("project asset info with known asset", "[project][asset]")
+{
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_7");
+    std::system("./mvlab project create /tmp/mvlab_cli_asset_test_7 --name TestProject 2>/dev/null");
+    std::system("printf 'fake audio' > /tmp/mvlab_cli_asset_test_7_src.mp3");
+    std::system("./mvlab project asset import /tmp/mvlab_cli_asset_test_7/mvlab_cli_asset_test_7.mvlab /tmp/mvlab_cli_asset_test_7_src.mp3 2>/dev/null");
+
+    auto out = run_mvlab_full("project asset info /tmp/mvlab_cli_asset_test_7/mvlab_cli_asset_test_7.mvlab asset-1");
+    CHECK(out.exit_code == 0);
+    CHECK(out.text.find("asset-1") != std::string::npos);
+    CHECK(out.text.find("audio") != std::string::npos);
+    CHECK(out.text.find("Size:") != std::string::npos);
+
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_7");
+    std::system("rm -f /tmp/mvlab_cli_asset_test_7_src.mp3");
+}
+
+TEST_CASE("project asset info with unknown asset", "[project][asset]")
+{
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_8");
+    std::system("./mvlab project create /tmp/mvlab_cli_asset_test_8 --name TestProject 2>/dev/null");
+
+    auto out = run_mvlab_full("project asset info /tmp/mvlab_cli_asset_test_8/mvlab_cli_asset_test_8.mvlab asset-999");
+    CHECK(out.exit_code == 3);  // file_not_found = 3
+    CHECK(out.text.find("Error") != std::string::npos);
+
+    std::system("rm -rf /tmp/mvlab_cli_asset_test_8");
+}
+
 TEST_CASE("CLI successful command exits 0 with unchanged output", "[cli][exit-code]")
 {
     std::string cmd = "ffmpeg -f lavfi -i anullsrc=r=48000:cl=stereo -t 0.3 -q:a 9 /tmp/mvlab_cli_success.wav -loglevel error -y 2>/dev/null";

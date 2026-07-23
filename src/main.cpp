@@ -1,6 +1,7 @@
 #include "audio_inspector.hpp"
 #include "audio_analyzer.hpp"
 #include "project_model.hpp"
+#include "media_asset.hpp"
 #include "error.hpp"
 #include "result.hpp"
 #include "logger.hpp"
@@ -64,6 +65,21 @@ T unwrap_or_exit(mvlab::Result<T> result)
         std::exit(mvlab::exit_code_for(result.error().code));
     }
     return std::move(result).value();
+}
+
+// Resolves a project argument to the project.json path.
+// Accepts either a directory path (MyProject.mvlab) or direct file path
+// (MyProject.mvlab/project.json).
+std::filesystem::path resolve_project_path(const std::string& project_arg)
+{
+    namespace fs = std::filesystem;
+    fs::path project_path(project_arg);
+
+    if (fs::is_directory(project_path)) {
+        project_path /= "project.json";
+    }
+
+    return project_path;
 }
 
 } // namespace
@@ -190,6 +206,69 @@ int main(int argc, char** argv)
         std::cout << "\n";
         std::cout << "Export:         " << project.export_settings.width << "x" << project.export_settings.height
                   << " @ " << project.export_settings.fps << " fps\n";
+    });
+
+    auto* asset_cmd = project_cmd->add_subcommand("asset", "Project media asset commands");
+
+    // Asset import command
+    auto* import_asset_cmd = asset_cmd->add_subcommand("import", "Import a media file into a project");
+    std::string import_project;
+    std::string import_source;
+    import_asset_cmd->add_option("project", import_project, "Project folder or project.json file")->required();
+    import_asset_cmd->add_option("source", import_source, "Path to media file to import")->required();
+
+    import_asset_cmd->callback([&import_project, &import_source]() {
+        std::filesystem::path project_file = resolve_project_path(import_project);
+        std::filesystem::path project_root = project_file.parent_path();
+
+        auto project = unwrap_or_exit(mvlab::load_project(project_file.string()));
+        auto imported = unwrap_or_exit(mvlab::import_media_asset(project, project_root, import_source));
+
+        std::cout << "Imported asset\n";
+        std::cout << "ID:            " << imported.id << "\n";
+        std::cout << "Type:          " << mvlab::to_string(imported.type) << "\n";
+        std::cout << "Display name:  " << imported.display_name << "\n";
+        std::cout << "Path:          " << imported.relative_path.string() << "\n";
+        std::cout << "Size:          " << imported.file_size << " bytes\n";
+    });
+
+    // Asset list command
+    auto* list_asset_cmd = asset_cmd->add_subcommand("list", "List all assets in a project");
+    std::string list_project;
+    list_asset_cmd->add_option("project", list_project, "Project folder or project.json file")->required();
+
+    list_asset_cmd->callback([&list_project]() {
+        std::filesystem::path project_file = resolve_project_path(list_project);
+        auto project = unwrap_or_exit(mvlab::load_project(project_file.string()));
+
+        std::cout << "Assets: " << project.assets.size() << "\n";
+        for (const auto& asset : project.assets) {
+            std::cout << asset.id << "  "
+                     << mvlab::to_string(asset.type) << "  "
+                     << asset.display_name << "  "
+                     << asset.relative_path.string() << "  "
+                     << asset.file_size << " bytes\n";
+        }
+    });
+
+    // Asset info command
+    auto* info_asset_cmd = asset_cmd->add_subcommand("info", "Display asset information");
+    std::string info_asset_project;
+    std::string asset_id;
+    info_asset_cmd->add_option("project", info_asset_project, "Project folder or project.json file")->required();
+    info_asset_cmd->add_option("asset-id", asset_id, "Asset ID")->required();
+
+    info_asset_cmd->callback([&info_asset_project, &asset_id]() {
+        std::filesystem::path project_file = resolve_project_path(info_asset_project);
+        auto project = unwrap_or_exit(mvlab::load_project(project_file.string()));
+
+        auto asset_ptr = unwrap_or_exit(mvlab::find_media_asset(project, asset_id));
+
+        std::cout << "ID:            " << asset_ptr->id << "\n";
+        std::cout << "Type:          " << mvlab::to_string(asset_ptr->type) << "\n";
+        std::cout << "Display name:  " << asset_ptr->display_name << "\n";
+        std::cout << "Path:          " << asset_ptr->relative_path.string() << "\n";
+        std::cout << "Size:          " << asset_ptr->file_size << " bytes\n";
     });
 
     try {
