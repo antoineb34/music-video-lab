@@ -98,38 +98,14 @@ int main(int argc, char** argv)
     create_cmd->add_option("--name", project_name, "Project display name")->required();
 
     create_cmd->callback([&create_folder, &project_name]() {
-        std::filesystem::path project_path(create_folder);
+        auto outcome = mvlab::create_project_on_disk(create_folder, project_name);
 
-        if (!project_path.string().ends_with(".mvlab")) {
-            project_path /= (project_path.filename().string() + ".mvlab");
-        }
-
-        if (std::filesystem::exists(project_path)) {
-            if (!std::filesystem::is_empty(project_path)) {
-                std::cerr << "Error: Project folder already exists and is not empty: " << project_path << "\n";
-                std::exit(1);
-            }
-        }
-
-        try {
-            std::filesystem::create_directories(project_path / "media");
-            std::filesystem::create_directories(project_path / "lyrics");
-            std::filesystem::create_directories(project_path / "analysis");
-            std::filesystem::create_directories(project_path / "renders");
-
-            auto project = mvlab::create_project(project_name);
-            auto [success, error] = mvlab::save_project(project, (project_path / "project.json").string());
-
-            if (!success) {
-                std::cerr << "Error: " << error << "\n";
-                std::exit(1);
-            }
-
-            std::cout << "Created project: " << project_path << "\n";
-        } catch (const std::exception& e) {
-            std::cerr << "Error: " << e.what() << "\n";
+        if (!outcome) {
+            std::cerr << "Error: " << outcome.error().message << "\n";
             std::exit(1);
         }
+
+        std::cout << "Created project: " << outcome.value().root.string() << "\n";
     });
 
     auto* info_cmd = project_cmd->add_subcommand("info", "Display project information");
@@ -144,12 +120,14 @@ int main(int argc, char** argv)
             project_path /= "project.json";
         }
 
-        auto [project, error] = mvlab::load_project(project_path.string());
+        auto outcome = mvlab::load_project(project_path.string());
 
-        if (!error.empty()) {
-            std::cerr << "Error: " << error << "\n";
+        if (!outcome) {
+            std::cerr << "Error: " << outcome.error().message << "\n";
             std::exit(1);
         }
+
+        const auto& project = outcome.value();
 
         std::cout << "Schema version: " << project.schema_version << "\n";
         std::cout << "Name:           " << project.name << "\n";

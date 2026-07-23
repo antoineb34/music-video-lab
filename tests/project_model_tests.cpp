@@ -7,8 +7,10 @@ namespace fs = std::filesystem;
 
 TEST_CASE("Project model: create_project creates default project", "[project_model]")
 {
-    auto project = mvlab::create_project("Test Project");
+    auto outcome = mvlab::create_project("Test Project");
 
+    REQUIRE(outcome.has_value());
+    const auto& project = outcome.value();
     REQUIRE(project.schema_version == 1);
     REQUIRE(project.name == "Test Project");
     REQUIRE(!project.audio.path.has_value());
@@ -21,116 +23,126 @@ TEST_CASE("Project model: create_project creates default project", "[project_mod
     REQUIRE(project.export_settings.fps == 30);
 }
 
+TEST_CASE("Project model: create_project rejects empty name", "[project_model]")
+{
+    auto outcome = mvlab::create_project("");
+
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_argument);
+}
+
 TEST_CASE("Project model: validate_project accepts valid project", "[project_model]")
 {
-    auto project = mvlab::create_project("Test Project");
-    auto [is_valid, error] = mvlab::validate_project(project);
+    auto project = mvlab::create_project("Test Project").value();
+    auto outcome = mvlab::validate_project(project);
 
-    REQUIRE(is_valid);
-    REQUIRE(error.empty());
+    REQUIRE(outcome.has_value());
 }
 
 TEST_CASE("Project model: validate_project rejects empty name", "[project_model]")
 {
-    auto project = mvlab::create_project("Test");
+    auto project = mvlab::create_project("Test").value();
     project.name = "";
 
-    auto [is_valid, error] = mvlab::validate_project(project);
+    auto outcome = mvlab::validate_project(project);
 
-    REQUIRE(!is_valid);
-    REQUIRE(error.find("name cannot be empty") != std::string::npos);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK(outcome.error().message.find("name cannot be empty") != std::string::npos);
 }
 
 TEST_CASE("Project model: validate_project rejects invalid schema version", "[project_model]")
 {
-    auto project = mvlab::create_project("Test");
+    auto project = mvlab::create_project("Test").value();
     project.schema_version = 2;
 
-    auto [is_valid, error] = mvlab::validate_project(project);
+    auto outcome = mvlab::validate_project(project);
 
-    REQUIRE(!is_valid);
-    REQUIRE(error.find("Unsupported schema version") != std::string::npos);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::unsupported_schema);
+    CHECK(outcome.error().message.find("Unsupported schema version") != std::string::npos);
 }
 
 TEST_CASE("Project model: validate_project rejects zero width", "[project_model]")
 {
-    auto project = mvlab::create_project("Test");
+    auto project = mvlab::create_project("Test").value();
     project.export_settings.width = 0;
 
-    auto [is_valid, error] = mvlab::validate_project(project);
+    auto outcome = mvlab::validate_project(project);
 
-    REQUIRE(!is_valid);
-    REQUIRE(error.find("width must be greater than zero") != std::string::npos);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK(outcome.error().message.find("width must be greater than zero") != std::string::npos);
 }
 
 TEST_CASE("Project model: validate_project rejects zero height", "[project_model]")
 {
-    auto project = mvlab::create_project("Test");
+    auto project = mvlab::create_project("Test").value();
     project.export_settings.height = 0;
 
-    auto [is_valid, error] = mvlab::validate_project(project);
+    auto outcome = mvlab::validate_project(project);
 
-    REQUIRE(!is_valid);
-    REQUIRE(error.find("height must be greater than zero") != std::string::npos);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK(outcome.error().message.find("height must be greater than zero") != std::string::npos);
 }
 
 TEST_CASE("Project model: validate_project rejects zero fps", "[project_model]")
 {
-    auto project = mvlab::create_project("Test");
+    auto project = mvlab::create_project("Test").value();
     project.export_settings.fps = 0;
 
-    auto [is_valid, error] = mvlab::validate_project(project);
+    auto outcome = mvlab::validate_project(project);
 
-    REQUIRE(!is_valid);
-    REQUIRE(error.find("fps must be greater than zero") != std::string::npos);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK(outcome.error().message.find("fps must be greater than zero") != std::string::npos);
 }
 
 TEST_CASE("Project model: validate_project rejects invalid background type", "[project_model]")
 {
-    auto project = mvlab::create_project("Test");
+    auto project = mvlab::create_project("Test").value();
     project.background.type = "invalid";
 
-    auto [is_valid, error] = mvlab::validate_project(project);
+    auto outcome = mvlab::validate_project(project);
 
-    REQUIRE(!is_valid);
-    REQUIRE(error.find("Invalid background type") != std::string::npos);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK(outcome.error().message.find("Invalid background type") != std::string::npos);
 }
 
 TEST_CASE("Project model: validate_project rejects invalid lyrics format", "[project_model]")
 {
-    auto project = mvlab::create_project("Test");
+    auto project = mvlab::create_project("Test").value();
     project.lyrics.format = "invalid";
 
-    auto [is_valid, error] = mvlab::validate_project(project);
+    auto outcome = mvlab::validate_project(project);
 
-    REQUIRE(!is_valid);
-    REQUIRE(error.find("Invalid lyrics format") != std::string::npos);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK(outcome.error().message.find("Invalid lyrics format") != std::string::npos);
 }
 
 TEST_CASE("Project model: validate_project accepts valid background types", "[project_model]")
 {
-    auto project = mvlab::create_project("Test");
+    auto project = mvlab::create_project("Test").value();
 
     project.background.type = "image";
-    auto [is_valid1, error1] = mvlab::validate_project(project);
-    REQUIRE(is_valid1);
+    CHECK(mvlab::validate_project(project).has_value());
 
     project.background.type = "video";
-    auto [is_valid2, error2] = mvlab::validate_project(project);
-    REQUIRE(is_valid2);
+    CHECK(mvlab::validate_project(project).has_value());
 }
 
 TEST_CASE("Project model: validate_project accepts valid lyrics formats", "[project_model]")
 {
-    auto project = mvlab::create_project("Test");
+    auto project = mvlab::create_project("Test").value();
 
     project.lyrics.format = "txt";
-    auto [is_valid1, error1] = mvlab::validate_project(project);
-    REQUIRE(is_valid1);
+    CHECK(mvlab::validate_project(project).has_value());
 
     project.lyrics.format = "lrc";
-    auto [is_valid2, error2] = mvlab::validate_project(project);
-    REQUIRE(is_valid2);
+    CHECK(mvlab::validate_project(project).has_value());
 }
 
 TEST_CASE("Project model: save_project and load_project round trip", "[project_model]")
@@ -141,19 +153,19 @@ TEST_CASE("Project model: save_project and load_project round trip", "[project_m
 
     std::string file_path = (temp_dir / "project.json").string();
 
-    auto original = mvlab::create_project("Round Trip Test");
+    auto original = mvlab::create_project("Round Trip Test").value();
     original.audio.path = "/path/to/audio.mp3";
     original.background.path = "/path/to/bg.mp4";
     original.background.type = "video";
     original.export_settings.width = 1280;
     original.export_settings.height = 720;
 
-    auto [save_success, save_error] = mvlab::save_project(original, file_path);
-    REQUIRE(save_success);
-    REQUIRE(save_error.empty());
+    auto save_outcome = mvlab::save_project(original, file_path);
+    REQUIRE(save_outcome.has_value());
 
-    auto [loaded, load_error] = mvlab::load_project(file_path);
-    REQUIRE(load_error.empty());
+    auto load_outcome = mvlab::load_project(file_path);
+    REQUIRE(load_outcome.has_value());
+    const auto& loaded = load_outcome.value();
     REQUIRE(loaded.name == "Round Trip Test");
     REQUIRE(loaded.audio.path == "/path/to/audio.mp3");
     REQUIRE(loaded.background.path == "/path/to/bg.mp4");
@@ -166,10 +178,11 @@ TEST_CASE("Project model: save_project and load_project round trip", "[project_m
 
 TEST_CASE("Project model: load_project handles missing file", "[project_model]")
 {
-    auto [project, error] = mvlab::load_project("/nonexistent/path/project.json");
+    auto outcome = mvlab::load_project("/nonexistent/path/project.json");
 
-    REQUIRE(!error.empty());
-    REQUIRE(error.find("not found") != std::string::npos);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::file_not_found);
+    CHECK(outcome.error().message.find("not found") != std::string::npos);
 }
 
 TEST_CASE("Project model: load_project handles malformed JSON", "[project_model]")
@@ -184,11 +197,11 @@ TEST_CASE("Project model: load_project handles malformed JSON", "[project_model]
     file << "{ invalid json }";
     file.close();
 
-    auto [project, error] = mvlab::load_project(file_path);
+    auto outcome = mvlab::load_project(file_path);
 
-    REQUIRE(!error.empty());
-    REQUIRE((error.find("JSON parsing") != std::string::npos ||
-             error.find("parsing") != std::string::npos));
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::malformed_project);
+    REQUIRE(outcome.error().details.has_value());
 
     fs::remove_all(temp_dir);
 }
@@ -213,10 +226,39 @@ TEST_CASE("Project model: load_project rejects unsupported schema version", "[pr
     file << j.dump(2);
     file.close();
 
-    auto [project, error] = mvlab::load_project(file_path);
+    auto outcome = mvlab::load_project(file_path);
 
-    REQUIRE(!error.empty());
-    REQUIRE(error.find("Unsupported schema version") != std::string::npos);
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::unsupported_schema);
+    CHECK(outcome.error().message.find("Unsupported schema version") != std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: load_project reports malformed_project for invalid field data", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "invalid_field";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    std::string file_path = (temp_dir / "project.json").string();
+
+    nlohmann::json j;
+    j["schema_version"] = 1;
+    j["name"] = "Test";
+    j["audio"] = nlohmann::json::object();
+    j["background"] = nlohmann::json::object();
+    j["lyrics"] = nlohmann::json::object();
+    j["export_settings"] = {{"width", 0}, {"height", 1080}, {"fps", 30}};
+
+    std::ofstream file(file_path);
+    file << j.dump(2);
+    file.close();
+
+    auto outcome = mvlab::load_project(file_path);
+
+    REQUIRE_FALSE(outcome.has_value());
+    CHECK(outcome.error().code == mvlab::ErrorCode::malformed_project);
 
     fs::remove_all(temp_dir);
 }
@@ -228,11 +270,10 @@ TEST_CASE("Project model: save_project creates parent directories", "[project_mo
 
     std::string file_path = (temp_dir / "project.json").string();
 
-    auto project = mvlab::create_project("Nested Test");
-    auto [success, error] = mvlab::save_project(project, file_path);
+    auto project = mvlab::create_project("Nested Test").value();
+    auto outcome = mvlab::save_project(project, file_path);
 
-    REQUIRE(success);
-    REQUIRE(error.empty());
+    REQUIRE(outcome.has_value());
     REQUIRE(fs::exists(file_path));
 
     fs::remove_all(temp_dir.parent_path());
@@ -246,23 +287,23 @@ TEST_CASE("Project model: path containing spaces", "[project_model]")
 
     std::string file_path = (temp_dir / "project.json").string();
 
-    auto project = mvlab::create_project("Spaces Test");
-    auto [save_success, save_error] = mvlab::save_project(project, file_path);
+    auto project = mvlab::create_project("Spaces Test").value();
+    auto save_outcome = mvlab::save_project(project, file_path);
 
-    REQUIRE(save_success);
+    REQUIRE(save_outcome.has_value());
     REQUIRE(fs::exists(file_path));
 
-    auto [loaded, load_error] = mvlab::load_project(file_path);
+    auto load_outcome = mvlab::load_project(file_path);
 
-    REQUIRE(load_error.empty());
-    REQUIRE(loaded.name == "Spaces Test");
+    REQUIRE(load_outcome.has_value());
+    REQUIRE(load_outcome.value().name == "Spaces Test");
 
     fs::remove_all(temp_dir);
 }
 
 TEST_CASE("Project model: validate_project accepts null optional fields", "[project_model]")
 {
-    auto project = mvlab::create_project("Test");
+    auto project = mvlab::create_project("Test").value();
 
     project.audio.path.reset();
     project.audio.analysis.reset();
@@ -271,8 +312,62 @@ TEST_CASE("Project model: validate_project accepts null optional fields", "[proj
     project.lyrics.path.reset();
     project.lyrics.format.reset();
 
-    auto [is_valid, error] = mvlab::validate_project(project);
+    auto outcome = mvlab::validate_project(project);
 
-    REQUIRE(is_valid);
-    REQUIRE(error.empty());
+    REQUIRE(outcome.has_value());
+}
+
+TEST_CASE("Project model: create_project_on_disk creates the .mvlab folder structure", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "on_disk";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    auto outcome = mvlab::create_project_on_disk(temp_dir / "myproject", "My Project");
+
+    REQUIRE(outcome.has_value());
+    const auto& paths = outcome.value();
+    CHECK(paths.root.string().ends_with(".mvlab"));
+    CHECK(fs::is_directory(paths.root / "media"));
+    CHECK(fs::is_directory(paths.root / "lyrics"));
+    CHECK(fs::is_directory(paths.root / "analysis"));
+    CHECK(fs::is_directory(paths.root / "renders"));
+    CHECK(fs::exists(paths.project_file));
+
+    auto load_outcome = mvlab::load_project(paths.project_file.string());
+    REQUIRE(load_outcome.has_value());
+    CHECK(load_outcome.value().name == "My Project");
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: create_project_on_disk refuses to overwrite an existing non-empty project", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "overwrite_refusal";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    auto first = mvlab::create_project_on_disk(temp_dir / "myproject", "First");
+    REQUIRE(first.has_value());
+
+    auto second = mvlab::create_project_on_disk(temp_dir / "myproject", "Second");
+    REQUIRE_FALSE(second.has_value());
+    CHECK(second.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK(second.error().message.find("already exists") != std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("Project model: create_project_on_disk accepts a path already ending in .mvlab", "[project_model]")
+{
+    auto temp_dir = fs::temp_directory_path() / "mvlab_test" / "explicit_suffix";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    auto outcome = mvlab::create_project_on_disk(temp_dir / "explicit.mvlab", "Explicit");
+
+    REQUIRE(outcome.has_value());
+    CHECK(outcome.value().root == temp_dir / "explicit.mvlab");
+
+    fs::remove_all(temp_dir);
 }
