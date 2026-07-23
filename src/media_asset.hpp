@@ -9,6 +9,8 @@
 
 namespace mvlab {
 
+struct Project;  // Forward declaration
+
 using AssetId = std::string;
 
 enum class MediaAssetType {
@@ -67,6 +69,28 @@ inline void from_json(const nlohmann::json& j, MediaAsset& asset)
     }
     asset.type = type_result.value();
 }
+
+// Generates a unique asset ID for the given project using a stable,
+// readable format (asset-1, asset-2, etc.). Inspects existing asset IDs
+// to avoid collisions. Safe after assets are removed.
+// Returns invalid_argument if the generated ID fails validation.
+AssetId generate_asset_id(const Project& project);
+
+// Find a mutable asset by ID in the project.
+// Returns invalid_argument if the requested ID is empty.
+// Returns file_not_found if the asset ID does not exist.
+Result<MediaAsset*> find_media_asset(
+    Project& project,
+    const AssetId& asset_id
+);
+
+// Find a const asset by ID in the project.
+// Returns invalid_argument if the requested ID is empty.
+// Returns file_not_found if the asset ID does not exist.
+Result<const MediaAsset*> find_media_asset(
+    const Project& project,
+    const AssetId& asset_id
+);
 
 } // namespace mvlab
 

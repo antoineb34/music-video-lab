@@ -1,4 +1,7 @@
 #include "media_asset.hpp"
+#include "project_model.hpp"
+#include <regex>
+#include <set>
 
 namespace mvlab {
 
@@ -86,6 +89,85 @@ Result<void> validate_media_asset(const MediaAsset& asset)
     }
 
     return Result<void>{};
+}
+
+AssetId generate_asset_id(const Project& project)
+{
+    std::set<int> used_numbers;
+
+    // Extract numbers from existing IDs matching the "asset-N" format
+    std::regex pattern("^asset-(\\d+)$");
+    for (const auto& asset : project.assets) {
+        std::smatch match;
+        if (std::regex_match(asset.id, match, pattern)) {
+            try {
+                int num = std::stoi(match[1].str());
+                used_numbers.insert(num);
+            } catch (...) {
+                // Ignore invalid numbers
+            }
+        }
+    }
+
+    // Find the next unused number starting from 1
+    int next_number = 1;
+    while (used_numbers.count(next_number)) {
+        ++next_number;
+    }
+
+    return "asset-" + std::to_string(next_number);
+}
+
+Result<MediaAsset*> find_media_asset(
+    Project& project,
+    const AssetId& asset_id
+)
+{
+    if (asset_id.empty()) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Asset ID cannot be empty",
+            std::nullopt
+        };
+    }
+
+    for (auto& asset : project.assets) {
+        if (asset.id == asset_id) {
+            return &asset;
+        }
+    }
+
+    return Error{
+        ErrorCode::file_not_found,
+        "Asset not found: " + asset_id,
+        std::nullopt
+    };
+}
+
+Result<const MediaAsset*> find_media_asset(
+    const Project& project,
+    const AssetId& asset_id
+)
+{
+    if (asset_id.empty()) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Asset ID cannot be empty",
+            std::nullopt
+        };
+    }
+
+    for (const auto& asset : project.assets) {
+        if (asset.id == asset_id) {
+            return &asset;
+        }
+    }
+
+    return Error{
+        ErrorCode::file_not_found,
+        "Asset not found: " + asset_id,
+        std::nullopt
+    };
 }
 
 } // namespace mvlab

@@ -1,5 +1,6 @@
 #include <catch2/catch_all.hpp>
 #include "media_asset.hpp"
+#include "project_model.hpp"
 #include <nlohmann/json.hpp>
 
 TEST_CASE("MediaAssetType: to_string converts enum to string", "[media_asset]")
@@ -236,4 +237,242 @@ TEST_CASE("MediaAsset: JSON serialization preserves all fields", "[media_asset]"
     CHECK(j["display_name"] == "Cover Art");
     CHECK(j["relative_path"] == "media/images/cover.png");
     CHECK(j["file_size"] == 256000);
+}
+
+TEST_CASE("Asset ID generation: empty project generates asset-1", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+
+    auto generated = mvlab::generate_asset_id(project);
+
+    CHECK(generated == "asset-1");
+}
+
+TEST_CASE("Asset ID generation: existing asset-1 generates asset-2", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Track", "media/track.mp3", 1000000
+    });
+
+    auto generated = mvlab::generate_asset_id(project);
+
+    CHECK(generated == "asset-2");
+}
+
+TEST_CASE("Asset ID generation: sequential IDs generate next ID", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Track1", "media/track1.mp3", 1000000
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-2", mvlab::MediaAssetType::audio, "Track2", "media/track2.mp3", 1000000
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-3", mvlab::MediaAssetType::audio, "Track3", "media/track3.mp3", 1000000
+    });
+
+    auto generated = mvlab::generate_asset_id(project);
+
+    CHECK(generated == "asset-4");
+}
+
+TEST_CASE("Asset ID generation: gaps do not cause collisions", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Track1", "media/track1.mp3", 1000000
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-3", mvlab::MediaAssetType::audio, "Track3", "media/track3.mp3", 1000000
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-5", mvlab::MediaAssetType::audio, "Track5", "media/track5.mp3", 1000000
+    });
+
+    auto generated = mvlab::generate_asset_id(project);
+
+    CHECK(generated == "asset-2");
+}
+
+TEST_CASE("Asset ID generation: unrelated custom IDs do not break generation", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "custom-id", mvlab::MediaAssetType::audio, "Track", "media/track.mp3", 1000000
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "user-defined-123", mvlab::MediaAssetType::audio, "Track2", "media/track2.mp3", 1000000
+    });
+
+    auto generated = mvlab::generate_asset_id(project);
+
+    CHECK(generated == "asset-1");
+}
+
+TEST_CASE("Asset ID generation: malformed managed-style IDs do not crash", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-abc", mvlab::MediaAssetType::audio, "Bad1", "media/track1.mp3", 1000000
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-", mvlab::MediaAssetType::audio, "Bad2", "media/track2.mp3", 1000000
+    });
+
+    auto generated = mvlab::generate_asset_id(project);
+
+    CHECK(generated == "asset-1");
+}
+
+TEST_CASE("Asset ID generation: generated IDs pass validation", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+
+    auto generated = mvlab::generate_asset_id(project);
+
+    mvlab::MediaAsset test_asset{
+        generated,
+        mvlab::MediaAssetType::audio,
+        "Test",
+        "media/test.mp3",
+        1000000
+    };
+
+    auto validation = mvlab::validate_media_asset(test_asset);
+    REQUIRE(validation.has_value());
+}
+
+TEST_CASE("Asset ID generation: generated ID is unique across project", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Track1", "media/track1.mp3", 1000000
+    });
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-2", mvlab::MediaAssetType::audio, "Track2", "media/track2.mp3", 1000000
+    });
+
+    auto generated = mvlab::generate_asset_id(project);
+
+    for (const auto& asset : project.assets) {
+        CHECK(asset.id != generated);
+    }
+}
+
+TEST_CASE("Asset lookup: mutable lookup finds existing asset", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Track", "media/track.mp3", 1000000
+    });
+
+    auto result = mvlab::find_media_asset(project, "asset-1");
+
+    REQUIRE(result.has_value());
+    CHECK(result.value()->id == "asset-1");
+    CHECK(result.value()->display_name == "Track");
+}
+
+TEST_CASE("Asset lookup: const lookup finds existing asset", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Track", "media/track.mp3", 1000000
+    });
+
+    const auto& const_project = project;
+    auto result = mvlab::find_media_asset(const_project, "asset-1");
+
+    REQUIRE(result.has_value());
+    CHECK(result.value()->id == "asset-1");
+}
+
+TEST_CASE("Asset lookup: mutable lookup permits changing the asset", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Original", "media/track.mp3", 1000000
+    });
+
+    auto result = mvlab::find_media_asset(project, "asset-1");
+    REQUIRE(result.has_value());
+
+    result.value()->display_name = "Modified";
+
+    CHECK(project.assets[0].display_name == "Modified");
+}
+
+TEST_CASE("Asset lookup: const lookup does not permit mutation", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Track", "media/track.mp3", 1000000
+    });
+
+    const auto& const_project = project;
+    auto result = mvlab::find_media_asset(const_project, "asset-1");
+
+    REQUIRE(result.has_value());
+
+    // This would not compile: result.value()->display_name = "Modified";
+    CHECK(result.value()->display_name == "Track");
+}
+
+TEST_CASE("Asset lookup: empty requested ID fails", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Track", "media/track.mp3", 1000000
+    });
+
+    auto result = mvlab::find_media_asset(project, "");
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
+    CHECK(result.error().message.find("cannot be empty") != std::string::npos);
+}
+
+TEST_CASE("Asset lookup: unknown ID fails", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::audio, "Track", "media/track.mp3", 1000000
+    });
+
+    auto result = mvlab::find_media_asset(project, "asset-999");
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::file_not_found);
+    CHECK(result.error().message.find("Asset not found") != std::string::npos);
+}
+
+TEST_CASE("Asset lookup: error code and details are correct", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+
+    auto result = mvlab::find_media_asset(project, "unknown-asset");
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::file_not_found);
+    CHECK(result.error().message.find("unknown-asset") != std::string::npos);
+}
+
+TEST_CASE("Asset lookup: mutable and const versions find same asset", "[media_asset]")
+{
+    auto project = mvlab::create_project("Test").value();
+    project.assets.push_back(mvlab::MediaAsset{
+        "asset-1", mvlab::MediaAssetType::video, "Background", "media/bg.mp4", 50000000
+    });
+
+    auto mutable_result = mvlab::find_media_asset(project, "asset-1");
+    const auto& const_project = project;
+    auto const_result = mvlab::find_media_asset(const_project, "asset-1");
+
+    REQUIRE(mutable_result.has_value());
+    REQUIRE(const_result.has_value());
+    CHECK(mutable_result.value()->id == const_result.value()->id);
+    CHECK(mutable_result.value()->display_name == const_result.value()->display_name);
+    CHECK(mutable_result.value()->file_size == const_result.value()->file_size);
 }
