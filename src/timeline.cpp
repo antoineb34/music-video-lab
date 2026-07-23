@@ -810,4 +810,460 @@ Result<void> move_clip(
     return Result<void>{};
 }
 
+Result<void> rename_track(
+    Timeline& timeline,
+    const TrackId& track_id,
+    std::string new_name)
+{
+    auto track_result = find_track(timeline, track_id);
+    if (!track_result) {
+        return track_result.error();
+    }
+
+    if (new_name.empty()) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Track name cannot be empty",
+            std::nullopt
+        };
+    }
+
+    Timeline candidate = timeline;
+
+    auto mutable_track = find_track(candidate, track_id);
+    if (!mutable_track) {
+        return mutable_track.error();
+    }
+
+    mutable_track.value()->name = new_name;
+
+    auto timeline_validation = validate_timeline(candidate);
+    if (!timeline_validation) {
+        return timeline_validation;
+    }
+
+    timeline = candidate;
+    return Result<void>{};
+}
+
+Result<void> move_track(
+    Timeline& timeline,
+    const TrackId& track_id,
+    std::size_t new_index)
+{
+    if (new_index > timeline.tracks.size()) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Track index out of range",
+            std::nullopt
+        };
+    }
+
+    auto track_result = find_track(timeline, track_id);
+    if (!track_result) {
+        return track_result.error();
+    }
+
+    Timeline candidate = timeline;
+
+    std::size_t current_index = timeline.tracks.size();
+    for (std::size_t i = 0; i < candidate.tracks.size(); ++i) {
+        if (candidate.tracks[i].id == track_id) {
+            current_index = i;
+            break;
+        }
+    }
+
+    if (current_index == new_index) {
+        return Result<void>{};
+    }
+
+    Track track_to_move = candidate.tracks[current_index];
+    candidate.tracks.erase(candidate.tracks.begin() + current_index);
+    candidate.tracks.insert(candidate.tracks.begin() + new_index, track_to_move);
+
+    timeline = candidate;
+    return Result<void>{};
+}
+
+Result<void> trim_media_clip_start(
+    Timeline& timeline,
+    const ClipId& clip_id,
+    TimelineTime new_timeline_start)
+{
+    auto clip_result = find_media_clip(timeline, clip_id);
+    if (!clip_result) {
+        return Error{
+            ErrorCode::file_not_found,
+            "Media clip not found: " + clip_id,
+            std::nullopt
+        };
+    }
+
+    const auto* clip = clip_result.value();
+    TimelineTime clip_end = clip->timeline_start + clip->duration;
+
+    if (new_timeline_start <= clip->timeline_start) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "New timeline start must be strictly after current start",
+            std::nullopt
+        };
+    }
+
+    if (new_timeline_start >= clip_end) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "New timeline start must be strictly before clip end",
+            std::nullopt
+        };
+    }
+
+    TimelineTime delta = new_timeline_start - clip->timeline_start;
+
+    if (clip->source_start > std::numeric_limits<TimelineTime>::max() - delta) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Source start and delta exceed maximum value",
+            std::nullopt
+        };
+    }
+
+    Timeline candidate = timeline;
+
+    auto mutable_clip = find_media_clip(candidate, clip_id);
+    if (!mutable_clip) {
+        return mutable_clip.error();
+    }
+
+    mutable_clip.value()->timeline_start += delta;
+    mutable_clip.value()->source_start += delta;
+    mutable_clip.value()->duration -= delta;
+
+    auto timeline_validation = validate_timeline(candidate);
+    if (!timeline_validation) {
+        return timeline_validation;
+    }
+
+    timeline = candidate;
+    return Result<void>{};
+}
+
+Result<void> trim_clip_end(
+    Timeline& timeline,
+    const ClipId& clip_id,
+    TimelineTime new_timeline_end)
+{
+    auto media_clip_result = find_media_clip(timeline, clip_id);
+    bool is_media = media_clip_result.operator bool();
+
+    if (!is_media) {
+        auto text_clip_result = find_text_clip(timeline, clip_id);
+        if (!text_clip_result) {
+            return Error{
+                ErrorCode::file_not_found,
+                "Clip not found: " + clip_id,
+                std::nullopt
+            };
+        }
+    }
+
+    Timeline candidate = timeline;
+
+    if (is_media) {
+        auto mutable_clip = find_media_clip(candidate, clip_id);
+        if (!mutable_clip) {
+            return mutable_clip.error();
+        }
+
+        if (new_timeline_end <= mutable_clip.value()->timeline_start) {
+            return Error{
+                ErrorCode::invalid_argument,
+                "New timeline end must be strictly after clip start",
+                std::nullopt
+            };
+        }
+
+        TimelineTime current_end = mutable_clip.value()->timeline_start + mutable_clip.value()->duration;
+        if (new_timeline_end > current_end) {
+            return Error{
+                ErrorCode::invalid_argument,
+                "Cannot extend clip end",
+                std::nullopt
+            };
+        }
+
+        TimelineTime new_duration = new_timeline_end - mutable_clip.value()->timeline_start;
+        if (new_duration <= 0) {
+            return Error{
+                ErrorCode::invalid_argument,
+                "Duration must be positive",
+                std::nullopt
+            };
+        }
+
+        mutable_clip.value()->duration = new_duration;
+    } else {
+        auto mutable_clip = find_text_clip(candidate, clip_id);
+        if (!mutable_clip) {
+            return mutable_clip.error();
+        }
+
+        if (new_timeline_end <= mutable_clip.value()->timeline_start) {
+            return Error{
+                ErrorCode::invalid_argument,
+                "New timeline end must be strictly after clip start",
+                std::nullopt
+            };
+        }
+
+        TimelineTime current_end = mutable_clip.value()->timeline_start + mutable_clip.value()->duration;
+        if (new_timeline_end > current_end) {
+            return Error{
+                ErrorCode::invalid_argument,
+                "Cannot extend clip end",
+                std::nullopt
+            };
+        }
+
+        TimelineTime new_duration = new_timeline_end - mutable_clip.value()->timeline_start;
+        if (new_duration <= 0) {
+            return Error{
+                ErrorCode::invalid_argument,
+                "Duration must be positive",
+                std::nullopt
+            };
+        }
+
+        mutable_clip.value()->duration = new_duration;
+    }
+
+    auto timeline_validation = validate_timeline(candidate);
+    if (!timeline_validation) {
+        return timeline_validation;
+    }
+
+    timeline = candidate;
+    return Result<void>{};
+}
+
+Result<ClipId> split_media_clip(
+    Timeline& timeline,
+    const ClipId& clip_id,
+    TimelineTime split_time,
+    ClipId right_clip_id)
+{
+    if (right_clip_id.empty()) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Right clip ID cannot be empty",
+            std::nullopt
+        };
+    }
+
+    auto clip_result = find_media_clip(timeline, clip_id);
+    if (!clip_result) {
+        return Error{
+            ErrorCode::file_not_found,
+            "Media clip not found: " + clip_id,
+            std::nullopt
+        };
+    }
+
+    const auto* clip = clip_result.value();
+    TimelineTime clip_end = clip->timeline_start + clip->duration;
+
+    if (split_time <= clip->timeline_start || split_time >= clip_end) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Split time must be strictly inside the clip",
+            std::nullopt
+        };
+    }
+
+    for (const auto& track : timeline.tracks) {
+        for (const auto& existing_clip : track.media_clips) {
+            if (existing_clip.id == right_clip_id) {
+                return Error{
+                    ErrorCode::invalid_argument,
+                    "Duplicate clip ID: " + right_clip_id,
+                    std::nullopt
+                };
+            }
+        }
+        for (const auto& existing_clip : track.text_clips) {
+            if (existing_clip.id == right_clip_id) {
+                return Error{
+                    ErrorCode::invalid_argument,
+                    "Duplicate clip ID: " + right_clip_id,
+                    std::nullopt
+                };
+            }
+        }
+    }
+
+    Timeline candidate = timeline;
+
+    auto mutable_clip = find_media_clip(candidate, clip_id);
+    if (!mutable_clip) {
+        return mutable_clip.error();
+    }
+
+    TimelineTime left_duration = split_time - mutable_clip.value()->timeline_start;
+    TimelineTime right_duration = mutable_clip.value()->timeline_start + mutable_clip.value()->duration - split_time;
+    TimelineTime right_source_start = mutable_clip.value()->source_start + left_duration;
+
+    if (right_source_start > std::numeric_limits<TimelineTime>::max() - right_duration) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Right clip source calculation exceeds maximum value",
+            std::nullopt
+        };
+    }
+
+    MediaClip right_clip{
+        right_clip_id,
+        mutable_clip.value()->asset_id,
+        split_time,
+        right_source_start,
+        right_duration
+    };
+
+    mutable_clip.value()->duration = left_duration;
+
+    auto find_track_result = find_track(candidate, "");
+    Track* containing_track = nullptr;
+    for (auto& track : candidate.tracks) {
+        for (auto& c : track.media_clips) {
+            if (c.id == clip_id) {
+                containing_track = &track;
+                break;
+            }
+        }
+        if (containing_track) break;
+    }
+
+    if (!containing_track) {
+        return Error{
+            ErrorCode::internal_error,
+            "Could not find containing track",
+            std::nullopt
+        };
+    }
+
+    containing_track->media_clips.push_back(right_clip);
+
+    auto timeline_validation = validate_timeline(candidate);
+    if (!timeline_validation) {
+        return timeline_validation.error();
+    }
+
+    timeline = candidate;
+    return right_clip_id;
+}
+
+Result<ClipId> split_text_clip(
+    Timeline& timeline,
+    const ClipId& clip_id,
+    TimelineTime split_time,
+    ClipId right_clip_id)
+{
+    if (right_clip_id.empty()) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Right clip ID cannot be empty",
+            std::nullopt
+        };
+    }
+
+    auto clip_result = find_text_clip(timeline, clip_id);
+    if (!clip_result) {
+        return Error{
+            ErrorCode::file_not_found,
+            "Text clip not found: " + clip_id,
+            std::nullopt
+        };
+    }
+
+    const auto* clip = clip_result.value();
+    TimelineTime clip_end = clip->timeline_start + clip->duration;
+
+    if (split_time <= clip->timeline_start || split_time >= clip_end) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Split time must be strictly inside the clip",
+            std::nullopt
+        };
+    }
+
+    for (const auto& track : timeline.tracks) {
+        for (const auto& existing_clip : track.media_clips) {
+            if (existing_clip.id == right_clip_id) {
+                return Error{
+                    ErrorCode::invalid_argument,
+                    "Duplicate clip ID: " + right_clip_id,
+                    std::nullopt
+                };
+            }
+        }
+        for (const auto& existing_clip : track.text_clips) {
+            if (existing_clip.id == right_clip_id) {
+                return Error{
+                    ErrorCode::invalid_argument,
+                    "Duplicate clip ID: " + right_clip_id,
+                    std::nullopt
+                };
+            }
+        }
+    }
+
+    Timeline candidate = timeline;
+
+    auto mutable_clip = find_text_clip(candidate, clip_id);
+    if (!mutable_clip) {
+        return mutable_clip.error();
+    }
+
+    TimelineTime left_duration = split_time - mutable_clip.value()->timeline_start;
+    TimelineTime right_duration = mutable_clip.value()->timeline_start + mutable_clip.value()->duration - split_time;
+
+    TextClip right_clip{
+        right_clip_id,
+        mutable_clip.value()->text,
+        split_time,
+        right_duration
+    };
+
+    mutable_clip.value()->duration = left_duration;
+
+    Track* containing_track = nullptr;
+    for (auto& track : candidate.tracks) {
+        for (auto& c : track.text_clips) {
+            if (c.id == clip_id) {
+                containing_track = &track;
+                break;
+            }
+        }
+        if (containing_track) break;
+    }
+
+    if (!containing_track) {
+        return Error{
+            ErrorCode::internal_error,
+            "Could not find containing track",
+            std::nullopt
+        };
+    }
+
+    containing_track->text_clips.push_back(right_clip);
+
+    auto timeline_validation = validate_timeline(candidate);
+    if (!timeline_validation) {
+        return timeline_validation.error();
+    }
+
+    timeline = candidate;
+    return right_clip_id;
+}
+
 } // namespace mvlab

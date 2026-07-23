@@ -167,6 +167,64 @@ Result<void> move_clip(
     const ClipId& clip_id,
     TimelineTime new_timeline_start);
 
+// Track organization operations
+
+// Rename a track. On failure, timeline is unchanged. Rejects empty names.
+Result<void> rename_track(
+    Timeline& timeline,
+    const TrackId& track_id,
+    std::string new_name);
+
+// Move a track to a new zero-based index position. On failure, timeline is
+// unchanged. Allows moving to current index as a no-op. Rejects out-of-range
+// indices. Preserves all tracks and clips exactly.
+Result<void> move_track(
+    Timeline& timeline,
+    const TrackId& track_id,
+    std::size_t new_index);
+
+// Trim operations
+
+// Trim the start of a media clip by adjusting timeline_start and source_start
+// while reducing duration. new_timeline_start must be strictly after the
+// current start and strictly before the clip end. On failure, timeline is
+// unchanged. Rejects text clips and resulting overlap.
+Result<void> trim_media_clip_start(
+    Timeline& timeline,
+    const ClipId& clip_id,
+    TimelineTime new_timeline_start);
+
+// Trim the end of a clip (media or text) to a new timeline end position.
+// new_timeline_end must be strictly after the clip start and at or before
+// the current end. On failure, timeline is unchanged. Does not extend clips.
+Result<void> trim_clip_end(
+    Timeline& timeline,
+    const ClipId& clip_id,
+    TimelineTime new_timeline_end);
+
+// Split operations
+
+// Split a media clip into left and right clips at an absolute timeline position.
+// Splits must occur strictly inside the clip. Preserves the original clip ID
+// for the left part and uses the caller-provided right_clip_id for the right part.
+// Returns the newly created right clip ID on success. On failure, timeline is
+// unchanged and no new ID is created. Rejects duplicate right clip IDs.
+Result<ClipId> split_media_clip(
+    Timeline& timeline,
+    const ClipId& clip_id,
+    TimelineTime split_time,
+    ClipId right_clip_id);
+
+// Split a text clip into left and right clips at an absolute timeline position.
+// Both clips share the same text. Splits must occur strictly inside the clip.
+// Returns the newly created right clip ID on success. On failure, timeline is
+// unchanged and no new ID is created. Rejects duplicate right clip IDs.
+Result<ClipId> split_text_clip(
+    Timeline& timeline,
+    const ClipId& clip_id,
+    TimelineTime split_time,
+    ClipId right_clip_id);
+
 } // namespace mvlab
 
 #endif // MVLAB_TIMELINE_HPP
