@@ -2,6 +2,8 @@
 #include "media_asset.hpp"
 #include "project_model.hpp"
 #include <nlohmann/json.hpp>
+#include <filesystem>
+#include <fstream>
 
 TEST_CASE("MediaAssetType: to_string converts enum to string", "[media_asset]")
 {
@@ -475,4 +477,484 @@ TEST_CASE("Asset lookup: mutable and const versions find same asset", "[media_as
     CHECK(mutable_result.value()->id == const_result.value()->id);
     CHECK(mutable_result.value()->display_name == const_result.value()->display_name);
     CHECK(mutable_result.value()->file_size == const_result.value()->file_size);
+}
+
+// Helper to create a temporary test file
+std::filesystem::path create_temp_file(const std::string& suffix)
+{
+    auto temp_dir = std::filesystem::temp_directory_path();
+    std::string template_str = temp_dir.string() + "/mvlab_test_XXXXXX" + suffix;
+
+    // Create a unique temporary file by mkstemp-like approach
+    static int counter = 0;
+    std::string filename = temp_dir.string() + "/mvlab_test_" +
+                          std::to_string(++counter) + suffix;
+    std::filesystem::path temp_path{filename};
+
+    // Create the file
+    std::ofstream file(temp_path);
+    file << "test content";
+    file.close();
+
+    return temp_path;
+}
+
+// Media type detection: audio extensions
+TEST_CASE("Media type detection: mp3 extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".mp3");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::audio);
+}
+
+TEST_CASE("Media type detection: wav extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".wav");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::audio);
+}
+
+TEST_CASE("Media type detection: flac extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".flac");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::audio);
+}
+
+TEST_CASE("Media type detection: ogg extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".ogg");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::audio);
+}
+
+TEST_CASE("Media type detection: m4a extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".m4a");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::audio);
+}
+
+TEST_CASE("Media type detection: aac extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".aac");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::audio);
+}
+
+// Media type detection: image extensions
+TEST_CASE("Media type detection: png extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".png");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::image);
+}
+
+TEST_CASE("Media type detection: jpg extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".jpg");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::image);
+}
+
+TEST_CASE("Media type detection: jpeg extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".jpeg");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::image);
+}
+
+TEST_CASE("Media type detection: webp extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".webp");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::image);
+}
+
+TEST_CASE("Media type detection: bmp extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".bmp");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::image);
+}
+
+// Media type detection: video extensions
+TEST_CASE("Media type detection: mp4 extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".mp4");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::video);
+}
+
+TEST_CASE("Media type detection: mkv extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".mkv");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::video);
+}
+
+TEST_CASE("Media type detection: mov extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".mov");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::video);
+}
+
+TEST_CASE("Media type detection: webm extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".webm");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::video);
+}
+
+TEST_CASE("Media type detection: avi extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".avi");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::video);
+}
+
+// Media type detection: case-insensitive
+TEST_CASE("Media type detection: uppercase extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".MP3");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::audio);
+}
+
+TEST_CASE("Media type detection: mixed-case extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".Mp4");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    CHECK(result.value() == mvlab::MediaAssetType::video);
+}
+
+// Media type detection: error cases
+TEST_CASE("Media type detection: unsupported extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".txt");
+    auto result = mvlab::detect_media_asset_type(temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::unsupported_format);
+}
+
+TEST_CASE("Media type detection: no extension", "[media_asset]")
+{
+    auto temp_path = std::filesystem::temp_directory_path() / "mvlab_test_no_ext";
+    std::ofstream file(temp_path);
+    file << "test";
+    file.close();
+
+    auto result = mvlab::detect_media_asset_type(temp_path);
+    std::filesystem::remove(temp_path);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::unsupported_format);
+}
+
+TEST_CASE("Media type detection: missing file", "[media_asset]")
+{
+    std::filesystem::path nonexistent = "/tmp/mvlab_nonexistent_12345.mp3";
+    auto result = mvlab::detect_media_asset_type(nonexistent);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::file_not_found);
+}
+
+TEST_CASE("Media type detection: directory instead of file", "[media_asset]")
+{
+    auto temp_dir = std::filesystem::temp_directory_path() / "mvlab_test_dir";
+    std::filesystem::create_directory(temp_dir);
+
+    auto result = mvlab::detect_media_asset_type(temp_dir);
+    std::filesystem::remove(temp_dir);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
+}
+
+TEST_CASE("Media type detection: empty path", "[media_asset]")
+{
+    auto result = mvlab::detect_media_asset_type("");
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
+}
+
+// Destination planning
+TEST_CASE("Media asset destination: normal filename with lowercase extension", "[media_asset]")
+{
+    auto temp = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_proj_1";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto result = mvlab::plan_media_asset_destination(project_root, temp);
+    std::filesystem::remove_all(project_root);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    auto dest = result.value();
+
+    CHECK(dest.relative_path.string().find("media/") == 0);
+    CHECK(dest.relative_path.string().find("..") == std::string::npos);
+}
+
+TEST_CASE("Media asset destination: uppercase extension normalized to lowercase", "[media_asset]")
+{
+    auto temp = create_temp_file(".MP3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_proj_2";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto result = mvlab::plan_media_asset_destination(project_root, temp);
+    std::filesystem::remove_all(project_root);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    auto dest = result.value();
+
+    // Check that extension in destination is lowercase
+    CHECK(dest.relative_path.string().find(".mp3") != std::string::npos);
+    CHECK(dest.relative_path.string().find(".MP3") == std::string::npos);
+}
+
+TEST_CASE("Media asset destination: spaces converted to dashes", "[media_asset]")
+{
+    // Create file with spaces in name
+    auto temp_dir = std::filesystem::temp_directory_path();
+    auto temp_path = temp_dir / "my song file.mp3";
+    std::ofstream file(temp_path);
+    file << "test";
+    file.close();
+
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_proj_3";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto result = mvlab::plan_media_asset_destination(project_root, temp_path);
+    std::filesystem::remove_all(project_root);
+    std::filesystem::remove(temp_path);
+
+    REQUIRE(result.has_value());
+    auto dest = result.value();
+
+    // Spaces should be converted to dashes
+    CHECK(dest.relative_path.string().find("my-song-file") != std::string::npos);
+    CHECK(dest.relative_path.string().find("my song file") == std::string::npos);
+}
+
+TEST_CASE("Media asset destination: punctuation collapsed", "[media_asset]")
+{
+    // Create file with punctuation
+    auto temp_dir = std::filesystem::temp_directory_path();
+    auto temp_path = temp_dir / "song!!!cool...mp3";
+    std::ofstream file(temp_path);
+    file << "test";
+    file.close();
+
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_proj_4";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto result = mvlab::plan_media_asset_destination(project_root, temp_path);
+    std::filesystem::remove_all(project_root);
+    std::filesystem::remove(temp_path);
+
+    REQUIRE(result.has_value());
+    auto dest = result.value();
+
+    // Runs of unsupported characters should collapse to single dash
+    CHECK(dest.relative_path.string().find("song-cool") != std::string::npos);
+}
+
+TEST_CASE("Media asset destination: unicode stem falls back to asset", "[media_asset]")
+{
+    // Create file with pure unicode name (no ASCII letters/digits)
+    auto temp_dir = std::filesystem::temp_directory_path();
+    auto temp_path = temp_dir / "🎵🎶.mp3";
+    std::ofstream file(temp_path);
+    file << "test";
+    file.close();
+
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_proj_5";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto result = mvlab::plan_media_asset_destination(project_root, temp_path);
+    std::filesystem::remove_all(project_root);
+    std::filesystem::remove(temp_path);
+
+    REQUIRE(result.has_value());
+    auto dest = result.value();
+
+    // Should use "asset" as fallback
+    CHECK(dest.relative_path.string().find("asset.mp3") != std::string::npos);
+}
+
+TEST_CASE("Media asset destination: collision produces -2 suffix", "[media_asset]")
+{
+    auto temp = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_proj_6";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    // Create the preferred file
+    auto preferred = project_root / "media" / (std::filesystem::path(temp).stem().string() + ".mp3");
+    std::ofstream file(preferred);
+    file << "existing";
+    file.close();
+
+    auto result = mvlab::plan_media_asset_destination(project_root, temp);
+    std::filesystem::remove_all(project_root);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    auto dest = result.value();
+
+    // Should have -2 suffix
+    CHECK(dest.relative_path.string().find("-2.mp3") != std::string::npos);
+}
+
+TEST_CASE("Media asset destination: existing -2 produces -3 suffix", "[media_asset]")
+{
+    auto temp = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_proj_7";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    // Create both preferred and -2
+    auto stem = std::filesystem::path(temp).stem().string();
+    auto preferred = project_root / "media" / (stem + ".mp3");
+    auto suffix2 = project_root / "media" / (stem + "-2.mp3");
+
+    std::ofstream file1(preferred);
+    file1 << "existing1";
+    file1.close();
+
+    std::ofstream file2(suffix2);
+    file2 << "existing2";
+    file2.close();
+
+    auto result = mvlab::plan_media_asset_destination(project_root, temp);
+    std::filesystem::remove_all(project_root);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    auto dest = result.value();
+
+    // Should have -3 suffix
+    CHECK(dest.relative_path.string().find("-3.mp3") != std::string::npos);
+}
+
+TEST_CASE("Media asset destination: relative path starts with media/", "[media_asset]")
+{
+    auto temp = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_proj_8";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto result = mvlab::plan_media_asset_destination(project_root, temp);
+    std::filesystem::remove_all(project_root);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    auto dest = result.value();
+
+    CHECK(dest.relative_path.string().find("media/") == 0);
+}
+
+TEST_CASE("Media asset destination: relative path has no ..", "[media_asset]")
+{
+    auto temp = create_temp_file(".mp3");
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_proj_9";
+    std::filesystem::create_directory(project_root);
+    std::filesystem::create_directory(project_root / "media");
+
+    auto result = mvlab::plan_media_asset_destination(project_root, temp);
+    std::filesystem::remove_all(project_root);
+    std::filesystem::remove(temp);
+
+    REQUIRE(result.has_value());
+    auto dest = result.value();
+
+    CHECK(dest.relative_path.string().find("..") == std::string::npos);
+}
+
+TEST_CASE("Media asset destination: empty project root", "[media_asset]")
+{
+    auto temp = create_temp_file(".mp3");
+    auto result = mvlab::plan_media_asset_destination("", temp);
+    std::filesystem::remove(temp);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
+}
+
+TEST_CASE("Media asset destination: empty source path", "[media_asset]")
+{
+    auto project_root = std::filesystem::temp_directory_path() / "mvlab_proj_10";
+    std::filesystem::create_directory(project_root);
+
+    auto result = mvlab::plan_media_asset_destination(project_root, "");
+    std::filesystem::remove_all(project_root);
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().code == mvlab::ErrorCode::invalid_argument);
 }

@@ -92,6 +92,30 @@ Result<const MediaAsset*> find_media_asset(
     const AssetId& asset_id
 );
 
+// Detects a media asset type from a source file's extension.
+// Returns file_not_found if the source does not exist.
+// Returns invalid_argument if the source is not a regular file or has an
+// unsupported extension.
+Result<MediaAssetType> detect_media_asset_type(
+    const std::filesystem::path& source_path
+);
+
+// Planned destination metadata for a media asset.
+struct MediaAssetDestination {
+    std::filesystem::path absolute_path;  // full filesystem path
+    std::filesystem::path relative_path;  // project-relative path (e.g. media/song.mp3)
+};
+
+// Plans a safe managed destination path inside a project's media/ directory.
+// Does not create files or directories; returns planned paths only.
+// Returns invalid_argument if project_root or source_path is empty.
+// Returns file_not_found if source_path does not exist.
+// Returns invalid_argument if source_path is not a regular file.
+Result<MediaAssetDestination> plan_media_asset_destination(
+    const std::filesystem::path& project_root,
+    const std::filesystem::path& source_path
+);
+
 } // namespace mvlab
 
 #endif // MVLAB_MEDIA_ASSET_HPP
