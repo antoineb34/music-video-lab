@@ -65,6 +65,12 @@ void add_media_track(Project& proj, TrackType type, TimelineTime start, Timeline
     proj.timeline.tracks.push_back(track);
 }
 
+// Helper to create default presentation for test fixtures
+TextPresentation default_text_presentation()
+{
+    return make_text_presentation_preset(TextPresentationPreset::clean_centered).value();
+}
+
 // Helper to add a text track with a clip
 void add_text_track(Project& proj, TimelineTime start, TimelineTime duration)
 {
@@ -84,7 +90,8 @@ void add_text_track(Project& proj, TimelineTime start, TimelineTime duration)
         clip_id,
         "Lyric",
         start,
-        duration
+        duration,
+        default_text_presentation()
     };
     track.text_clips.push_back(clip);
     proj.timeline.tracks.push_back(track);

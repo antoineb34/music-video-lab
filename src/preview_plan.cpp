@@ -171,22 +171,9 @@ Result<PreviewFramePlan> build_preview_frame_plan(
                     }
                     TimelineTime remaining_duration = clip_end - playhead;
 
-                    // Sample the text presentation and animation state
-                    // For now, TextClip doesn't store presentation directly,
-                    // so we use the clean_centered preset as the default
-                    auto preset_result = make_text_presentation_preset(
-                        TextPresentationPreset::clean_centered);
-                    if (!preset_result) {
-                        return Error{
-                            ErrorCode::invalid_argument,
-                            "Failed to load default text presentation",
-                            std::nullopt
-                        };
-                    }
-                    TextPresentation presentation = preset_result.value();
-
+                    // Sample the animation state from the clip's own presentation
                     auto animation_result = sample_text_presentation(
-                        presentation,
+                        clip.presentation,
                         clip.duration,
                         local_time);
                     if (!animation_result) {
@@ -200,7 +187,7 @@ Result<PreviewFramePlan> build_preview_frame_plan(
                         clip.timeline_start,
                         local_time,
                         remaining_duration,
-                        presentation,
+                        clip.presentation,
                         animation_result.value()
                     };
 

@@ -35,6 +35,33 @@ Project create_empty_project()
     return proj;
 }
 
+// Helper to create default presentation for test fixtures
+TextPresentation default_text_presentation()
+{
+    return make_text_presentation_preset(TextPresentationPreset::clean_centered).value();
+}
+
+// Helper to create a non-default presentation, distinct in every field from
+// both the TextStyle defaults and the clean_centered preset.
+TextPresentation create_custom_text_presentation()
+{
+    TextPresentation pres;
+    pres.style.font_family = "Serif";
+    pres.style.font_size = 36.0f;
+    pres.style.bold = true;
+    pres.style.italic = true;
+    pres.style.fill_color = {0.8f, 0.2f, 0.9f, 0.95f};
+    pres.style.outline_color = {0.1f, 0.8f, 0.3f, 0.7f};
+    pres.style.outline_width = 2.5f;
+    pres.style.position_x = 0.25f;
+    pres.style.position_y = 0.75f;
+    pres.style.horizontal_alignment = TextHorizontalAlignment::left;
+    pres.style.vertical_alignment = TextVerticalAlignment::top;
+    pres.entrance = {TextAnimationKind::fade, 500000, EasingKind::ease_out};
+    pres.exit = {TextAnimationKind::slide_from_right, 400000, EasingKind::ease_in};
+    return pres;
+}
+
 }  // namespace
 
 // ===== General cases =====
@@ -595,7 +622,8 @@ TEST_CASE("Active text clip included", "[preview_plan][text]")
         "text-clip-1",
         "Hello, World!",
         0,
-        1000000
+        1000000,
+        default_text_presentation()
     };
     text_track.text_clips.push_back(clip);
     proj.timeline.tracks.push_back(text_track);
@@ -623,7 +651,8 @@ TEST_CASE("Text content preserved exactly", "[preview_plan][text]")
         "text-clip-1",
         test_text,
         0,
-        1000000
+        1000000,
+        default_text_presentation()
     };
     text_track.text_clips.push_back(clip);
     proj.timeline.tracks.push_back(text_track);
@@ -647,7 +676,8 @@ TEST_CASE("Text local time calculation", "[preview_plan][text]")
         "text-clip-1",
         "Text",
         500000,
-        2000000
+        2000000,
+        default_text_presentation()
     };
     text_track.text_clips.push_back(clip);
     proj.timeline.tracks.push_back(text_track);
@@ -674,7 +704,8 @@ TEST_CASE("Text remaining duration calculation", "[preview_plan][text]")
         "text-clip-1",
         "Text",
         0,
-        3000000
+        3000000,
+        default_text_presentation()
     };
     text_track.text_clips.push_back(clip);
     proj.timeline.tracks.push_back(text_track);
@@ -698,7 +729,8 @@ TEST_CASE("Steady-state animation sampled", "[preview_plan][text]")
         "text-clip-1",
         "Text",
         0,
-        1000000
+        1000000,
+        default_text_presentation()
     };
     text_track.text_clips.push_back(clip);
     proj.timeline.tracks.push_back(text_track);
@@ -728,7 +760,8 @@ TEST_CASE("Text animation state is valid", "[preview_plan][text]")
         "text-clip-1",
         "Text",
         0,
-        1000000
+        1000000,
+        default_text_presentation()
     };
     text_track.text_clips.push_back(clip);
     proj.timeline.tracks.push_back(text_track);
@@ -758,7 +791,8 @@ TEST_CASE("Multiple text tracks preserve ordering", "[preview_plan][text]")
         "clip-1",
         "First",
         0,
-        1000000
+        1000000,
+        default_text_presentation()
     };
     text_track1.text_clips.push_back(clip1);
 
@@ -773,7 +807,8 @@ TEST_CASE("Multiple text tracks preserve ordering", "[preview_plan][text]")
         "clip-2",
         "Second",
         0,
-        1000000
+        1000000,
+        default_text_presentation()
     };
     text_track2.text_clips.push_back(clip2);
 
@@ -838,7 +873,8 @@ TEST_CASE("Simultaneous audio, video, and text clips", "[preview_plan][mixed]")
         "text-clip-1",
         "Lyric",
         0,
-        2000000
+        2000000,
+        default_text_presentation()
     };
     text_track.text_clips.push_back(text_clip);
 
@@ -869,7 +905,8 @@ TEST_CASE("Text tracks do not appear in media lists", "[preview_plan][mixed]")
         "text-clip-1",
         "Text",
         0,
-        1000000
+        1000000,
+        default_text_presentation()
     };
     text_track.text_clips.push_back(clip);
     proj.timeline.tracks.push_back(text_track);
@@ -930,7 +967,8 @@ TEST_CASE("Deterministic complete frame plan", "[preview_plan][mixed]")
         "clip-3",
         "Lyric",
         0,
-        2000000
+        2000000,
+        default_text_presentation()
     };
     track3.text_clips.push_back(clip3);
 
@@ -1016,7 +1054,8 @@ TEST_CASE("Text-only project needs no media asset", "[preview_plan][assets]")
         "text-clip-1",
         "Text",
         0,
-        1000000
+        1000000,
+        default_text_presentation()
     };
     text_track.text_clips.push_back(clip);
     proj.timeline.tracks.push_back(text_track);
@@ -1068,7 +1107,8 @@ TEST_CASE("Playhead zero with zero-duration clip edge case", "[preview_plan][bou
         "text-clip-1",
         "Text",
         0,
-        1000000
+        1000000,
+        default_text_presentation()
     };
     text_track.text_clips.push_back(clip);
     proj.timeline.tracks.push_back(text_track);
@@ -1076,4 +1116,223 @@ TEST_CASE("Playhead zero with zero-duration clip edge case", "[preview_plan][bou
     auto result = build_preview_frame_plan(proj, 0);
     REQUIRE(result);
     REQUIRE(result.value().text_clips.size() == 1);
+}
+
+// ===== Cross-feature: TextClip::presentation consumed by preview planning =====
+//
+// These tests prove that preview planning uses the exact TextPresentation
+// stored on TextClip (attached by the timeline-presentation feature), with
+// no production fallback substituting a default preset for current-schema
+// clips. Persistence-schema migration (old timeline JSON -> clean_centered)
+// belongs to timeline deserialization, not preview planning; the last test
+// below confirms preview planning consumes that already-migrated value.
+
+TEST_CASE("Custom text presentation fields are preserved exactly in preview frame plan",
+    "[preview_plan][text_presentation]")
+{
+    auto proj = create_empty_project();
+    Track text_track{
+        "text-track",
+        TrackType::text,
+        "Text",
+        {},
+        {}
+    };
+    auto custom = create_custom_text_presentation();
+    TextClip clip{
+        "text-clip-1",
+        "Custom styled text",
+        0,
+        2000000,
+        custom
+    };
+    text_track.text_clips.push_back(clip);
+    proj.timeline.tracks.push_back(text_track);
+
+    // A playhead outside both the entrance and exit windows, so only the
+    // static style/animation-definition fields are under test here.
+    auto result = build_preview_frame_plan(proj, 1000000);
+    REQUIRE(result);
+    REQUIRE(result.value().text_clips.size() == 1);
+
+    const auto& active = result.value().text_clips[0].presentation;
+    CHECK(active.style.font_family == custom.style.font_family);
+    CHECK(active.style.font_size == custom.style.font_size);
+    CHECK(active.style.fill_color.red == custom.style.fill_color.red);
+    CHECK(active.style.fill_color.green == custom.style.fill_color.green);
+    CHECK(active.style.fill_color.blue == custom.style.fill_color.blue);
+    CHECK(active.style.fill_color.alpha == custom.style.fill_color.alpha);
+    CHECK(active.style.outline_color.red == custom.style.outline_color.red);
+    CHECK(active.style.outline_color.green == custom.style.outline_color.green);
+    CHECK(active.style.outline_color.blue == custom.style.outline_color.blue);
+    CHECK(active.style.outline_color.alpha == custom.style.outline_color.alpha);
+    CHECK(active.style.outline_width == custom.style.outline_width);
+    CHECK(active.style.position_x == custom.style.position_x);
+    CHECK(active.style.position_y == custom.style.position_y);
+    CHECK(active.style.horizontal_alignment == custom.style.horizontal_alignment);
+    CHECK(active.style.vertical_alignment == custom.style.vertical_alignment);
+    CHECK(active.entrance.kind == custom.entrance.kind);
+    CHECK(active.entrance.duration_us == custom.entrance.duration_us);
+    CHECK(active.entrance.easing == custom.entrance.easing);
+    CHECK(active.exit.kind == custom.exit.kind);
+    CHECK(active.exit.duration_us == custom.exit.duration_us);
+    CHECK(active.exit.easing == custom.exit.easing);
+
+    // Sanity check: none of these match the clean_centered fallback preset,
+    // so this is not passing by coincidence with a substituted default.
+    auto fallback = default_text_presentation();
+    CHECK(active.style.font_family != fallback.style.font_family);
+    CHECK(active.style.vertical_alignment != fallback.style.vertical_alignment);
+}
+
+TEST_CASE("Preview animation state is sampled from the clip's own custom presentation",
+    "[preview_plan][text_presentation]")
+{
+    auto proj = create_empty_project();
+    Track text_track{
+        "text-track",
+        TrackType::text,
+        "Text",
+        {},
+        {}
+    };
+    // clean_centered has entrance.kind == none, which always yields steady
+    // state (opacity 1.0). A custom fade entrance sampled at clip start
+    // must yield opacity 0.0 -- this only holds if the real presentation
+    // (not a clean_centered fallback) drove the sampling.
+    auto custom = create_custom_text_presentation();
+    TextClip clip{
+        "text-clip-1",
+        "Fading in",
+        0,
+        2000000,
+        custom
+    };
+    text_track.text_clips.push_back(clip);
+    proj.timeline.tracks.push_back(text_track);
+
+    auto result = build_preview_frame_plan(proj, 0);
+    REQUIRE(result);
+    REQUIRE(result.value().text_clips.size() == 1);
+    CHECK(result.value().text_clips[0].animation_state.opacity == 0.0f);
+}
+
+TEST_CASE("Split text clip preserves presentation on both sides in preview plan",
+    "[preview_plan][text_presentation][split]")
+{
+    auto proj = create_empty_project();
+    auto custom = create_custom_text_presentation();
+    Track text_track{
+        "text-track",
+        TrackType::text,
+        "Text",
+        {},
+        {}
+    };
+    text_track.text_clips.push_back(TextClip{
+        "clip-1",
+        "Hello World",
+        0,
+        2000000,
+        custom
+    });
+    proj.timeline.tracks.push_back(text_track);
+
+    auto split_result = split_text_clip(proj.timeline, "clip-1", 1000000, "clip-2");
+    REQUIRE(split_result);
+
+    auto left_plan = build_preview_frame_plan(proj, 500000);
+    REQUIRE(left_plan);
+    REQUIRE(left_plan.value().text_clips.size() == 1);
+    CHECK(left_plan.value().text_clips[0].clip_id == "clip-1");
+    CHECK(left_plan.value().text_clips[0].presentation.style.font_family == custom.style.font_family);
+    CHECK(left_plan.value().text_clips[0].presentation.entrance.kind == custom.entrance.kind);
+
+    auto right_plan = build_preview_frame_plan(proj, 1500000);
+    REQUIRE(right_plan);
+    REQUIRE(right_plan.value().text_clips.size() == 1);
+    CHECK(right_plan.value().text_clips[0].clip_id == "clip-2");
+    CHECK(right_plan.value().text_clips[0].presentation.style.font_family == custom.style.font_family);
+    CHECK(right_plan.value().text_clips[0].presentation.entrance.kind == custom.entrance.kind);
+}
+
+TEST_CASE("Moved and trimmed text clip still exposes its presentation through preview planning",
+    "[preview_plan][text_presentation][editing]")
+{
+    auto proj = create_empty_project();
+    auto custom = create_custom_text_presentation();
+    Track text_track{
+        "text-track",
+        TrackType::text,
+        "Text",
+        {},
+        {}
+    };
+    text_track.text_clips.push_back(TextClip{
+        "clip-1",
+        "Moving text",
+        0,
+        2000000,
+        custom
+    });
+    proj.timeline.tracks.push_back(text_track);
+
+    auto move_result = move_clip(proj.timeline, "clip-1", 1000000);
+    REQUIRE(move_result);
+    auto trim_result = trim_clip_end(proj.timeline, "clip-1", 2500000);
+    REQUIRE(trim_result);
+
+    auto plan = build_preview_frame_plan(proj, 2000000);
+    REQUIRE(plan);
+    REQUIRE(plan.value().text_clips.size() == 1);
+    CHECK(plan.value().text_clips[0].presentation.style.font_family == custom.style.font_family);
+    CHECK(plan.value().text_clips[0].presentation.style.outline_width == custom.style.outline_width);
+    CHECK(plan.value().text_clips[0].presentation.entrance.kind == custom.entrance.kind);
+    CHECK(plan.value().text_clips[0].presentation.exit.kind == custom.exit.kind);
+}
+
+TEST_CASE("Timeline-v1 migrated text clip presentation flows into preview planning unmodified",
+    "[preview_plan][text_presentation][migration]")
+{
+    // A v1 timeline document predates TextClip::presentation; deserialization
+    // migrates it to clean_centered. Preview planning must consume that
+    // already-migrated value, not apply a fallback of its own.
+    nlohmann::json v1_json{
+        {"schema_version", 1},
+        {"tracks", nlohmann::json::array({
+            nlohmann::json{
+                {"id", "track-1"},
+                {"type", "text"},
+                {"name", "Lyrics"},
+                {"media_clips", nlohmann::json::array()},
+                {"text_clips", nlohmann::json::array({
+                    nlohmann::json{
+                        {"id", "clip-1"},
+                        {"text", "Migrated text"},
+                        {"timeline_start_us", 0},
+                        {"duration_us", 2000000}
+                    }
+                })}
+            }
+        })}
+    };
+
+    auto timeline_result = timeline_from_json(v1_json);
+    REQUIRE(timeline_result);
+
+    auto proj = create_empty_project();
+    proj.timeline = timeline_result.value();
+
+    auto plan = build_preview_frame_plan(proj, 1000000);
+    REQUIRE(plan);
+    REQUIRE(plan.value().text_clips.size() == 1);
+
+    auto expected = default_text_presentation();  // clean_centered
+    const auto& active = plan.value().text_clips[0].presentation;
+    CHECK(active.style.horizontal_alignment == expected.style.horizontal_alignment);
+    CHECK(active.style.vertical_alignment == expected.style.vertical_alignment);
+    CHECK(active.style.position_x == expected.style.position_x);
+    CHECK(active.style.position_y == expected.style.position_y);
+    CHECK(active.entrance.kind == expected.entrance.kind);
+    CHECK(active.exit.kind == expected.exit.kind);
 }
