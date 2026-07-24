@@ -1,4 +1,5 @@
 #include "timeline_serialization.hpp"
+#include "text_presentation.hpp"
 #include <stdexcept>
 #include <string>
 
@@ -21,11 +22,18 @@ nlohmann::json media_clip_to_json(const MediaClip& clip)
 
 nlohmann::json text_clip_to_json(const TextClip& clip)
 {
+    auto presentation_json = text_presentation_to_json(clip.presentation);
+    if (!presentation_json) {
+        throw std::runtime_error(
+            "Failed to serialize text presentation: " + presentation_json.error().message);
+    }
+
     return nlohmann::json{
         {"id", clip.id},
         {"text", clip.text},
         {"timeline_start_us", clip.timeline_start},
-        {"duration_us", clip.duration}
+        {"duration_us", clip.duration},
+        {"presentation", presentation_json.value()}
     };
 }
 
@@ -101,7 +109,7 @@ MediaClip media_clip_from_json(const nlohmann::json& j)
     return clip;
 }
 
-TextClip text_clip_from_json(const nlohmann::json& j)
+TextClip text_clip_from_json_v1(const nlohmann::json& j)
 {
     if (!j.is_object()) {
         throw std::runtime_error("text clip must be an object");
@@ -112,10 +120,49 @@ TextClip text_clip_from_json(const nlohmann::json& j)
     clip.text = require_string_field(j, "text");
     clip.timeline_start = require_time_field(j, "timeline_start_us");
     clip.duration = require_time_field(j, "duration_us");
+
+    // Use default clean_centered presentation for migrated v1 clips
+    auto default_presentation = make_text_presentation_preset(
+        TextPresentationPreset::clean_centered);
+    if (!default_presentation) {
+        throw std::runtime_error(
+            "Failed to create default presentation: " + default_presentation.error().message);
+    }
+    clip.presentation = default_presentation.value();
+
     return clip;
 }
 
-Track track_from_json(const nlohmann::json& j, std::size_t track_index)
+TextClip text_clip_from_json_v2(const nlohmann::json& j)
+{
+    if (!j.is_object()) {
+        throw std::runtime_error("text clip must be an object");
+    }
+
+    TextClip clip;
+    clip.id = require_string_field(j, "id");
+    clip.text = require_string_field(j, "text");
+    clip.timeline_start = require_time_field(j, "timeline_start_us");
+    clip.duration = require_time_field(j, "duration_us");
+
+    if (!j.contains("presentation")) {
+        throw std::runtime_error("missing required field 'presentation'");
+    }
+
+    auto presentation_result = text_presentation_from_json(j.at("presentation"));
+    if (!presentation_result) {
+        throw std::runtime_error(
+            "Failed to parse presentation: " + presentation_result.error().message);
+    }
+
+    clip.presentation = presentation_result.value();
+    return clip;
+}
+
+Track track_from_json_base(
+    const nlohmann::json& j,
+    std::size_t track_index,
+    bool expect_presentation)
 {
     try {
         if (!j.is_object()) {
@@ -153,7 +200,11 @@ Track track_from_json(const nlohmann::json& j, std::size_t track_index)
         clip_index = 0;
         for (const auto& clip_json : j["text_clips"]) {
             try {
-                track.text_clips.push_back(text_clip_from_json(clip_json));
+                if (expect_presentation) {
+                    track.text_clips.push_back(text_clip_from_json_v2(clip_json));
+                } else {
+                    track.text_clips.push_back(text_clip_from_json_v1(clip_json));
+                }
             } catch (const std::exception& e) {
                 throw std::runtime_error(
                     "text_clips[" + std::to_string(clip_index) + "]: " + e.what());
@@ -168,10 +219,8 @@ Track track_from_json(const nlohmann::json& j, std::size_t track_index)
     }
 }
 
-// Parses the schema-version-1 timeline body (the only version this build
-// currently understands). Adding schema version 2 in the future means
-// adding a parse_timeline_v2() alongside this one and extending the
-// dispatch switch in timeline_from_json() below.
+// Parses the schema-version-1 timeline body. Text clips receive the default
+// clean_centered presentation during migration.
 Result<Timeline> parse_timeline_v1(const nlohmann::json& json)
 {
     if (!json.contains("tracks") || !json["tracks"].is_array()) {
@@ -186,7 +235,42 @@ Result<Timeline> parse_timeline_v1(const nlohmann::json& json)
     std::size_t track_index = 0;
     for (const auto& track_json : json["tracks"]) {
         try {
-            timeline.tracks.push_back(track_from_json(track_json, track_index));
+            timeline.tracks.push_back(track_from_json_base(track_json, track_index, false));
+        } catch (const std::exception& e) {
+            return Error{
+                ErrorCode::serialization_error,
+                "Malformed timeline JSON",
+                std::string(e.what())
+            };
+        }
+        ++track_index;
+    }
+
+    auto validation = validate_timeline(timeline);
+    if (!validation) {
+        return validation.error();
+    }
+
+    return timeline;
+}
+
+// Parses the schema-version-2 timeline body. Text clips must include
+// a valid presentation object.
+Result<Timeline> parse_timeline_v2(const nlohmann::json& json)
+{
+    if (!json.contains("tracks") || !json["tracks"].is_array()) {
+        return Error{
+            ErrorCode::serialization_error,
+            "Malformed timeline JSON",
+            std::string("field 'tracks' must be an array")
+        };
+    }
+
+    Timeline timeline;
+    std::size_t track_index = 0;
+    for (const auto& track_json : json["tracks"]) {
+        try {
+            timeline.tracks.push_back(track_from_json_base(track_json, track_index, true));
         } catch (const std::exception& e) {
             return Error{
                 ErrorCode::serialization_error,
@@ -267,6 +351,8 @@ Result<Timeline> timeline_from_json(const nlohmann::json& json)
     switch (schema_version) {
         case 1:
             return parse_timeline_v1(json);
+        case 2:
+            return parse_timeline_v2(json);
         default:
             return Error{
                 ErrorCode::unsupported_schema,

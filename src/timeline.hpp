@@ -3,6 +3,7 @@
 
 #include "result.hpp"
 #include "media_asset.hpp"
+#include "text_presentation.hpp"
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -48,6 +49,7 @@ struct TextClip {
     std::string text;
     TimelineTime timeline_start;   // where this clip appears on the track
     TimelineTime duration;         // how long to display the text
+    TextPresentation presentation; // visual style and animations
 };
 
 // A track is a sequence of clips (either media or text).
