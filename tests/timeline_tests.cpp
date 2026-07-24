@@ -4,6 +4,12 @@
 
 using namespace mvlab;
 
+// Helper to create default presentation for test fixtures
+inline TextPresentation default_text_presentation()
+{
+    return make_text_presentation_preset(TextPresentationPreset::clean_centered).value();
+}
+
 // ===== Time and clip validation =====
 
 TEST_CASE("Valid media clip", "[timeline][validation]")
@@ -25,7 +31,8 @@ TEST_CASE("Valid text clip", "[timeline][validation]")
         "Hello world",
         0,           // timeline_start
         1000000      // duration (1 second in microseconds)
-    };
+    , default_text_presentation()
+};
     REQUIRE(validate_text_clip(clip));
 }
 
@@ -50,7 +57,8 @@ TEST_CASE("Empty clip ID rejected for text clip", "[timeline][validation]")
         "Hello",
         0,
         1000000
-    };
+    , default_text_presentation()
+};
     auto result = validate_text_clip(clip);
     REQUIRE(!result);
     REQUIRE(result.error().code == ErrorCode::invalid_argument);
@@ -77,7 +85,8 @@ TEST_CASE("Empty text rejected for text clip", "[timeline][validation]")
         "",
         0,
         1000000
-    };
+    , default_text_presentation()
+};
     auto result = validate_text_clip(clip);
     REQUIRE(!result);
     REQUIRE(result.error().code == ErrorCode::invalid_argument);
@@ -104,7 +113,8 @@ TEST_CASE("Negative timeline start rejected for text clip", "[timeline][validati
         "Hello",
         -1,
         1000000
-    };
+    , default_text_presentation()
+};
     auto result = validate_text_clip(clip);
     REQUIRE(!result);
     REQUIRE(result.error().code == ErrorCode::invalid_argument);
@@ -142,7 +152,8 @@ TEST_CASE("Zero duration rejected", "[timeline][validation]")
         "Hello",
         0,
         0
-    };
+    , default_text_presentation()
+};
     result = validate_text_clip(text_clip);
     REQUIRE(!result);
     REQUIRE(result.error().code == ErrorCode::invalid_argument);
@@ -166,7 +177,8 @@ TEST_CASE("Negative duration rejected", "[timeline][validation]")
         "Hello",
         0,
         -1
-    };
+    , default_text_presentation()
+};
     result = validate_text_clip(text_clip);
     REQUIRE(!result);
     REQUIRE(result.error().code == ErrorCode::invalid_argument);
@@ -193,7 +205,8 @@ TEST_CASE("Endpoint overflow detected for text clip", "[timeline][validation]")
         "Hello",
         std::numeric_limits<TimelineTime>::max() - 100,
         1000  // Exceeds max when added to timeline_start
-    };
+    , default_text_presentation()
+};
     auto result = validate_text_clip(clip);
     REQUIRE(!result);
     REQUIRE(result.error().code == ErrorCode::invalid_argument);
@@ -238,8 +251,8 @@ TEST_CASE("Valid text track", "[timeline][validation]")
         "Lyrics",
         {},
         {
-            TextClip{"clip-1", "Verse 1", 0, 5000000},
-            TextClip{"clip-2", "Chorus", 5000000, 3000000}
+            TextClip{"clip-1", "Verse 1", 0, 5000000, default_text_presentation()},
+            TextClip{"clip-2", "Chorus", 5000000, 3000000, default_text_presentation()}
         }
     };
     REQUIRE(validate_track(track));
@@ -280,7 +293,7 @@ TEST_CASE("Text clip on audio track rejected", "[timeline][validation]")
         TrackType::audio,
         "Backing",
         {},
-        {TextClip{"clip-1", "Hello", 0, 1000000}}
+        {TextClip{"clip-1", "Hello", 0, 1000000, default_text_presentation()}}
     };
     auto result = validate_track(track);
     REQUIRE(!result);
@@ -294,7 +307,7 @@ TEST_CASE("Text clip on video track rejected", "[timeline][validation]")
         TrackType::video,
         "Background",
         {},
-        {TextClip{"clip-1", "Hello", 0, 1000000}}
+        {TextClip{"clip-1", "Hello", 0, 1000000, default_text_presentation()}}
     };
     auto result = validate_track(track);
     REQUIRE(!result);
@@ -430,7 +443,7 @@ TEST_CASE("Multiple valid tracks accepted", "[timeline][validation]")
                 TrackType::text,
                 "Lyrics",
                 {},
-                {TextClip{"clip-3", "Verse", 0, 1000000}}
+                {TextClip{"clip-3", "Verse", 0, 1000000, default_text_presentation()}}
             }
         }
     };
@@ -503,7 +516,7 @@ TEST_CASE("Mixed clip types with duplicate IDs rejected", "[timeline][validation
                 TrackType::text,
                 "Text",
                 {},
-                {TextClip{"clip-1", "Hello", 0, 1000000}}
+                {TextClip{"clip-1", "Hello", 0, 1000000, default_text_presentation()}}
             }
         }
     };
@@ -643,7 +656,7 @@ TEST_CASE("Clip IDs are unique across media and text clips", "[timeline][id_gene
                 TrackType::text,
                 "B",
                 {},
-                {TextClip{"clip-2", "Hello", 0, 1000000}}
+                {TextClip{"clip-2", "Hello", 0, 1000000, default_text_presentation()}}
             }
         }
     };
@@ -819,8 +832,8 @@ TEST_CASE("Find mutable text clip by ID", "[timeline][lookup]")
                 "T",
                 {},
                 {
-                    TextClip{"clip-1", "Verse", 0, 1000000},
-                    TextClip{"clip-2", "Chorus", 1000000, 1000000}
+                    TextClip{"clip-1", "Verse", 0, 1000000, default_text_presentation()},
+                    TextClip{"clip-2", "Chorus", 1000000, 1000000, default_text_presentation()}
                 }
             }
         }
@@ -840,7 +853,7 @@ TEST_CASE("Find const text clip by ID", "[timeline][lookup]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Verse", 0, 1000000}}
+                {TextClip{"clip-1", "Verse", 0, 1000000, default_text_presentation()}}
             }
         }
     };
@@ -859,14 +872,14 @@ TEST_CASE("Text clip lookup searches all tracks", "[timeline][lookup]")
                 TrackType::text,
                 "T1",
                 {},
-                {TextClip{"clip-1", "Verse", 0, 1000000}}
+                {TextClip{"clip-1", "Verse", 0, 1000000, default_text_presentation()}}
             },
             {
                 "track-2",
                 TrackType::text,
                 "T2",
                 {},
-                {TextClip{"clip-2", "Chorus", 0, 1000000}}
+                {TextClip{"clip-2", "Chorus", 0, 1000000, default_text_presentation()}}
             }
         }
     };
@@ -884,7 +897,7 @@ TEST_CASE("Text clip lookup returns unknown ID error", "[timeline][lookup]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Verse", 0, 1000000}}
+                {TextClip{"clip-1", "Verse", 0, 1000000, default_text_presentation()}}
             }
         }
     };
@@ -902,7 +915,7 @@ TEST_CASE("Text clip lookup returns empty ID error", "[timeline][lookup]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Verse", 0, 1000000}}
+                {TextClip{"clip-1", "Verse", 0, 1000000, default_text_presentation()}}
             }
         }
     };
@@ -981,7 +994,7 @@ TEST_CASE("Add track with invalid contents rejects", "[timeline][editing]")
         TrackType::audio,
         "A",
         {MediaClip{"clip-1", "asset-1", 0, 0, 1000000}},
-        {TextClip{"clip-2", "Hello", 0, 1000000}}
+        {TextClip{"clip-2", "Hello", 0, 1000000, default_text_presentation()}}
     };
     auto result = add_track(timeline, track);
     REQUIRE(!result);
@@ -1255,7 +1268,8 @@ TEST_CASE("Add text clip to text track", "[timeline][editing]")
             {"track-1", TrackType::text, "T", {}, {}}
         }
     };
-    TextClip clip{"clip-1", "Verse", 0, 1000000};
+    TextClip clip{"clip-1", "Verse", 0, 1000000, default_text_presentation()
+};
     auto result = add_text_clip(timeline, "track-1", clip);
     REQUIRE(result);
     REQUIRE(timeline.tracks[0].text_clips.size() == 1);
@@ -1269,7 +1283,8 @@ TEST_CASE("Reject text clip on audio track", "[timeline][editing]")
             {"track-1", TrackType::audio, "A", {}, {}}
         }
     };
-    TextClip clip{"clip-1", "Hello", 0, 1000000};
+    TextClip clip{"clip-1", "Hello", 0, 1000000, default_text_presentation()
+};
     auto result = add_text_clip(timeline, "track-1", clip);
     REQUIRE(!result);
     REQUIRE(result.error().code == ErrorCode::invalid_argument);
@@ -1283,7 +1298,8 @@ TEST_CASE("Reject text clip on video track", "[timeline][editing]")
             {"track-1", TrackType::video, "V", {}, {}}
         }
     };
-    TextClip clip{"clip-1", "Hello", 0, 1000000};
+    TextClip clip{"clip-1", "Hello", 0, 1000000, default_text_presentation()
+};
     auto result = add_text_clip(timeline, "track-1", clip);
     REQUIRE(!result);
     REQUIRE(result.error().code == ErrorCode::invalid_argument);
@@ -1293,7 +1309,8 @@ TEST_CASE("Reject text clip on video track", "[timeline][editing]")
 TEST_CASE("Reject text clip on missing track", "[timeline][editing]")
 {
     Timeline timeline{{}};
-    TextClip clip{"clip-1", "Hello", 0, 1000000};
+    TextClip clip{"clip-1", "Hello", 0, 1000000, default_text_presentation()
+};
     auto result = add_text_clip(timeline, "track-999", clip);
     REQUIRE(!result);
     REQUIRE(result.error().code == ErrorCode::file_not_found);
@@ -1308,11 +1325,12 @@ TEST_CASE("Reject duplicate clip ID when adding text clip", "[timeline][editing]
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Verse", 0, 1000000}}
+                {TextClip{"clip-1", "Verse", 0, 1000000, default_text_presentation()}}
             }
         }
     };
-    TextClip clip{"clip-1", "Chorus", 1000000, 1000000};
+    TextClip clip{"clip-1", "Chorus", 1000000, 1000000, default_text_presentation()
+};
     auto result = add_text_clip(timeline, "track-1", clip);
     REQUIRE(!result);
     REQUIRE(result.error().code == ErrorCode::invalid_argument);
@@ -1328,11 +1346,12 @@ TEST_CASE("Reject overlapping text clips", "[timeline][editing]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Verse", 0, 1000000}}
+                {TextClip{"clip-1", "Verse", 0, 1000000, default_text_presentation()}}
             }
         }
     };
-    TextClip clip{"clip-2", "Chorus", 500000, 1000000};
+    TextClip clip{"clip-2", "Chorus", 500000, 1000000, default_text_presentation()
+};
     auto result = add_text_clip(timeline, "track-1", clip);
     REQUIRE(!result);
     REQUIRE(result.error().code == ErrorCode::invalid_argument);
@@ -1347,11 +1366,12 @@ TEST_CASE("Allow exact endpoint adjacency for text clips", "[timeline][editing]"
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Verse", 0, 1000000}}
+                {TextClip{"clip-1", "Verse", 0, 1000000, default_text_presentation()}}
             }
         }
     };
-    TextClip clip{"clip-2", "Chorus", 1000000, 1000000};
+    TextClip clip{"clip-2", "Chorus", 1000000, 1000000, default_text_presentation()
+};
     auto result = add_text_clip(timeline, "track-1", clip);
     REQUIRE(result);
     REQUIRE(timeline.tracks[0].text_clips.size() == 2);
@@ -1366,12 +1386,13 @@ TEST_CASE("Failed text clip insertion leaves timeline unchanged", "[timeline][ed
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Verse", 0, 1000000}}
+                {TextClip{"clip-1", "Verse", 0, 1000000, default_text_presentation()}}
             }
         }
     };
     auto original = timeline;
-    TextClip clip{"clip-1", "Chorus", 1000000, 1000000};
+    TextClip clip{"clip-1", "Chorus", 1000000, 1000000, default_text_presentation()
+};
     add_text_clip(timeline, "track-1", clip);
     REQUIRE(timeline.tracks[0].text_clips.size() == original.tracks[0].text_clips.size());
 }
@@ -1410,8 +1431,8 @@ TEST_CASE("Remove text clip", "[timeline][editing]")
                 "T",
                 {},
                 {
-                    TextClip{"clip-1", "Verse", 0, 1000000},
-                    TextClip{"clip-2", "Chorus", 1000000, 1000000}
+                    TextClip{"clip-1", "Verse", 0, 1000000, default_text_presentation()},
+                    TextClip{"clip-2", "Chorus", 1000000, 1000000, default_text_presentation()}
                 }
             }
         }
@@ -1515,7 +1536,7 @@ TEST_CASE("Move text clip successfully", "[timeline][editing]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Verse", 0, 1000000}}
+                {TextClip{"clip-1", "Verse", 0, 1000000, default_text_presentation()}}
             }
         }
     };
@@ -1955,7 +1976,7 @@ TEST_CASE("Reject trim on text clip", "[timeline][trim]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 1000000, 2000000}}
+                {TextClip{"clip-1", "Hello", 1000000, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2030,7 +2051,7 @@ TEST_CASE("Trim text clip end successfully", "[timeline][trim]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 1000000, 2000000}}
+                {TextClip{"clip-1", "Hello", 1000000, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2424,7 +2445,7 @@ TEST_CASE("Reject split on text clip", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 0, 2000000}}
+                {TextClip{"clip-1", "Hello", 0, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2479,7 +2500,7 @@ TEST_CASE("Split text clip successfully", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello World", 0, 2000000}}
+                {TextClip{"clip-1", "Hello World", 0, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2498,7 +2519,7 @@ TEST_CASE("Split text produces exact durations", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 0, 2000000}}
+                {TextClip{"clip-1", "Hello", 0, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2517,7 +2538,7 @@ TEST_CASE("Split text preserves/copies text", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello World", 0, 2000000}}
+                {TextClip{"clip-1", "Hello World", 0, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2536,7 +2557,7 @@ TEST_CASE("Split text preserves original ID on left", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 0, 2000000}}
+                {TextClip{"clip-1", "Hello", 0, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2554,7 +2575,7 @@ TEST_CASE("Split text uses supplied right ID", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 0, 2000000}}
+                {TextClip{"clip-1", "Hello", 0, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2573,7 +2594,7 @@ TEST_CASE("Split text inserts into same track", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 0, 2000000}}
+                {TextClip{"clip-1", "Hello", 0, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2591,7 +2612,7 @@ TEST_CASE("Split text deterministic ordering", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 0, 2000000}}
+                {TextClip{"clip-1", "Hello", 0, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2609,7 +2630,7 @@ TEST_CASE("Reject text split at start", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 0, 2000000}}
+                {TextClip{"clip-1", "Hello", 0, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2628,7 +2649,7 @@ TEST_CASE("Reject text split at end", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 0, 2000000}}
+                {TextClip{"clip-1", "Hello", 0, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2646,7 +2667,7 @@ TEST_CASE("Reject text split duplicate/empty right ID", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 0, 2000000}}
+                {TextClip{"clip-1", "Hello", 0, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2682,7 +2703,7 @@ TEST_CASE("Reject text split on missing clip", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 0, 2000000}}
+                {TextClip{"clip-1", "Hello", 0, 2000000, default_text_presentation()}}
             }
         }
     };
@@ -2700,7 +2721,7 @@ TEST_CASE("Failed text split leaves timeline unchanged", "[timeline][split]")
                 TrackType::text,
                 "T",
                 {},
-                {TextClip{"clip-1", "Hello", 0, 2000000}}
+                {TextClip{"clip-1", "Hello", 0, 2000000, default_text_presentation()}}
             }
         }
     };
