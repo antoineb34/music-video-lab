@@ -2709,3 +2709,203 @@ TEST_CASE("Failed text split leaves timeline unchanged", "[timeline][split]")
     REQUIRE(timeline.tracks[0].text_clips.size() == original.tracks[0].text_clips.size());
     REQUIRE(timeline.tracks[0].text_clips[0].duration == original.tracks[0].text_clips[0].duration);
 }
+
+// ===== Text presentation preservation through edits =====
+
+// Helper to create a rich, non-default presentation for testing
+TextPresentation create_test_presentation() {
+    TextPresentation pres;
+    pres.style.font_family = "Serif";
+    pres.style.font_size = 36.0f;
+    pres.style.bold = true;
+    pres.style.italic = true;
+    pres.style.fill_color = {0.8f, 0.2f, 0.9f, 0.95f};
+    pres.style.outline_color = {0.1f, 0.8f, 0.3f, 0.7f};
+    pres.style.outline_width = 2.5f;
+    pres.style.position_x = 0.25f;
+    pres.style.position_y = 0.75f;
+    pres.style.horizontal_alignment = TextHorizontalAlignment::left;
+    pres.style.vertical_alignment = TextVerticalAlignment::top;
+    pres.entrance = {TextAnimationKind::slide_from_left, 400000, EasingKind::ease_in};
+    pres.exit = {TextAnimationKind::slide_from_right, 300000, EasingKind::ease_out};
+    return pres;
+}
+
+// Helper to verify two presentations are identical
+void assert_presentations_equal(const TextPresentation& a, const TextPresentation& b) {
+    REQUIRE(a.style.font_family == b.style.font_family);
+    REQUIRE(a.style.font_size == b.style.font_size);
+    REQUIRE(a.style.bold == b.style.bold);
+    REQUIRE(a.style.italic == b.style.italic);
+    REQUIRE(a.style.fill_color.red == b.style.fill_color.red);
+    REQUIRE(a.style.fill_color.green == b.style.fill_color.green);
+    REQUIRE(a.style.fill_color.blue == b.style.fill_color.blue);
+    REQUIRE(a.style.fill_color.alpha == b.style.fill_color.alpha);
+    REQUIRE(a.style.outline_color.red == b.style.outline_color.red);
+    REQUIRE(a.style.outline_color.green == b.style.outline_color.green);
+    REQUIRE(a.style.outline_color.blue == b.style.outline_color.blue);
+    REQUIRE(a.style.outline_color.alpha == b.style.outline_color.alpha);
+    REQUIRE(a.style.outline_width == b.style.outline_width);
+    REQUIRE(a.style.position_x == b.style.position_x);
+    REQUIRE(a.style.position_y == b.style.position_y);
+    REQUIRE(a.style.horizontal_alignment == b.style.horizontal_alignment);
+    REQUIRE(a.style.vertical_alignment == b.style.vertical_alignment);
+    REQUIRE(a.entrance.kind == b.entrance.kind);
+    REQUIRE(a.entrance.duration_us == b.entrance.duration_us);
+    REQUIRE(a.entrance.easing == b.entrance.easing);
+    REQUIRE(a.exit.kind == b.exit.kind);
+    REQUIRE(a.exit.duration_us == b.exit.duration_us);
+    REQUIRE(a.exit.easing == b.exit.easing);
+}
+
+TEST_CASE("Text presentation preserved by move_clip", "[timeline][text_presentation][editing]")
+{
+    auto custom_pres = create_test_presentation();
+    Timeline timeline{
+        {
+            Track{
+                "track-1",
+                TrackType::text,
+                "Lyrics",
+                {},
+                {TextClip{"clip-1", "Hello", 0, 2000000, custom_pres}}
+            }
+        }
+    };
+
+    auto original_presentation = timeline.tracks[0].text_clips[0].presentation;
+
+    // Move the clip
+    auto result = move_clip(timeline, "clip-1", 5000000);
+    REQUIRE(result);
+
+    // Verify timing changed
+    REQUIRE(timeline.tracks[0].text_clips[0].timeline_start == 5000000);
+    REQUIRE(timeline.tracks[0].text_clips[0].duration == 2000000);
+
+    // Verify text preserved
+    REQUIRE(timeline.tracks[0].text_clips[0].text == "Hello");
+
+    // Verify presentation preserved exactly
+    assert_presentations_equal(timeline.tracks[0].text_clips[0].presentation, original_presentation);
+}
+
+TEST_CASE("Text presentation preserved by trim_clip_end", "[timeline][text_presentation][editing]")
+{
+    auto custom_pres = create_test_presentation();
+    Timeline timeline{
+        {
+            Track{
+                "track-1",
+                TrackType::text,
+                "Lyrics",
+                {},
+                {TextClip{"clip-1", "Hello", 0, 3000000, custom_pres}}
+            }
+        }
+    };
+
+    auto original_presentation = timeline.tracks[0].text_clips[0].presentation;
+    auto original_text = timeline.tracks[0].text_clips[0].text;
+
+    // Trim the clip end
+    auto result = trim_clip_end(timeline, "clip-1", 1500000);
+    REQUIRE(result);
+
+    // Verify duration changed
+    REQUIRE(timeline.tracks[0].text_clips[0].duration == 1500000);
+
+    // Verify start and text unchanged
+    REQUIRE(timeline.tracks[0].text_clips[0].timeline_start == 0);
+    REQUIRE(timeline.tracks[0].text_clips[0].text == original_text);
+
+    // Verify presentation preserved exactly
+    assert_presentations_equal(timeline.tracks[0].text_clips[0].presentation, original_presentation);
+}
+
+TEST_CASE("Text presentation copied by split_text_clip", "[timeline][text_presentation][editing]")
+{
+    auto custom_pres = create_test_presentation();
+    Timeline timeline{
+        {
+            Track{
+                "track-1",
+                TrackType::text,
+                "Lyrics",
+                {},
+                {TextClip{"clip-1", "Hello world", 0, 4000000, custom_pres}}
+            }
+        }
+    };
+
+    auto original_presentation = timeline.tracks[0].text_clips[0].presentation;
+
+    // Split the clip
+    auto result = split_text_clip(timeline, "clip-1", 2000000, "clip-2");
+    REQUIRE(result);
+    REQUIRE(result.value() == "clip-2");
+
+    // Verify we have two clips now
+    REQUIRE(timeline.tracks[0].text_clips.size() == 2);
+
+    // Verify left clip
+    REQUIRE(timeline.tracks[0].text_clips[0].id == "clip-1");
+    REQUIRE(timeline.tracks[0].text_clips[0].text == "Hello world");
+    REQUIRE(timeline.tracks[0].text_clips[0].timeline_start == 0);
+    REQUIRE(timeline.tracks[0].text_clips[0].duration == 2000000);
+    assert_presentations_equal(timeline.tracks[0].text_clips[0].presentation, original_presentation);
+
+    // Verify right clip
+    REQUIRE(timeline.tracks[0].text_clips[1].id == "clip-2");
+    REQUIRE(timeline.tracks[0].text_clips[1].text == "Hello world");
+    REQUIRE(timeline.tracks[0].text_clips[1].timeline_start == 2000000);
+    REQUIRE(timeline.tracks[0].text_clips[1].duration == 2000000);
+    assert_presentations_equal(timeline.tracks[0].text_clips[1].presentation, original_presentation);
+
+    // Verify presentations are independent copies (not aliased)
+    // Modify right clip's presentation and verify left is unchanged
+    timeline.tracks[0].text_clips[1].presentation.style.font_size = 12.0f;
+    REQUIRE(timeline.tracks[0].text_clips[0].presentation.style.font_size == 36.0f);
+}
+
+TEST_CASE("Failed move_clip preserves presentation and leaves timeline unchanged", "[timeline][text_presentation][editing]")
+{
+    auto custom_pres = create_test_presentation();
+    Timeline timeline{
+        {
+            Track{
+                "track-1",
+                TrackType::text,
+                "Lyrics",
+                {},
+                {
+                    TextClip{"clip-1", "First", 0, 2000000, custom_pres},
+                    TextClip{"clip-2", "Second", 2000000, 2000000, custom_pres}
+                }
+            }
+        }
+    };
+
+    // Save original state
+    auto original_timeline = timeline;
+
+    // Try to move clip-1 to a position that would cause overlap with clip-2
+    auto result = move_clip(timeline, "clip-1", 2500000);
+    REQUIRE(!result);
+    REQUIRE(result.error().code == ErrorCode::invalid_argument);
+
+    // Verify timeline is completely unchanged, including presentation
+    REQUIRE(timeline.tracks.size() == original_timeline.tracks.size());
+    REQUIRE(timeline.tracks[0].text_clips.size() == 2);
+    
+    for (size_t i = 0; i < timeline.tracks[0].text_clips.size(); ++i) {
+        REQUIRE(timeline.tracks[0].text_clips[i].id == original_timeline.tracks[0].text_clips[i].id);
+        REQUIRE(timeline.tracks[0].text_clips[i].text == original_timeline.tracks[0].text_clips[i].text);
+        REQUIRE(timeline.tracks[0].text_clips[i].timeline_start == original_timeline.tracks[0].text_clips[i].timeline_start);
+        REQUIRE(timeline.tracks[0].text_clips[i].duration == original_timeline.tracks[0].text_clips[i].duration);
+        assert_presentations_equal(
+            timeline.tracks[0].text_clips[i].presentation,
+            original_timeline.tracks[0].text_clips[i].presentation
+        );
+    }
+}
