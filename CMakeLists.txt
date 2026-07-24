@@ -46,6 +46,9 @@ add_library(mvlab_core STATIC
     src/timeline_serialization.cpp
     src/lyrics.cpp
     src/text_presentation.cpp
+    src/preview_plan.cpp
+    src/preview_session.cpp
+    src/media_probe.cpp
 )
 
 target_include_directories(mvlab_core PUBLIC
@@ -93,6 +96,9 @@ add_executable(
     tests/timeline_serialization_tests.cpp
     tests/lyrics_tests.cpp
     tests/text_presentation_tests.cpp
+    tests/preview_plan_tests.cpp
+    tests/preview_session_tests.cpp
+    tests/media_probe_tests.cpp
 )
 
 target_link_libraries(mvlab_tests PRIVATE

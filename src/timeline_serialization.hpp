@@ -11,7 +11,7 @@ namespace mvlab {
 // Current schema version written by timeline_to_json() and the newest
 // version accepted by timeline_from_json(). Bump this and add a parallel
 // parse_timeline_vN() dispatch case when the on-disk shape changes.
-inline constexpr std::uint32_t current_timeline_schema_version = 1;
+inline constexpr std::uint32_t current_timeline_schema_version = 2;
 
 // Serializes a Timeline into its versioned JSON representation (see
 // timeline_serialization.cpp for the exact shape). Validates the timeline

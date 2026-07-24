@@ -822,7 +822,7 @@ TEST_CASE("Project model: save_project writes schema v2", "[project_model][timel
     REQUIRE(j.contains("schema_version"));
     CHECK(j["schema_version"] == 2);
     REQUIRE(j.contains("timeline"));
-    CHECK(j["timeline"]["schema_version"] == 1);
+    CHECK(j["timeline"]["schema_version"] == 2);
     CHECK(j["timeline"]["tracks"].is_array());
     CHECK(j["timeline"]["tracks"].empty());
 
@@ -879,14 +879,15 @@ TEST_CASE("Project model: populated mixed timeline survives project round trip",
         {mvlab::MediaClip{"clip-2", "asset-2", 0, 0, 3000000}},
         {}
     });
+    auto default_presentation = mvlab::make_text_presentation_preset(mvlab::TextPresentationPreset::clean_centered).value();
     project.timeline.tracks.push_back(mvlab::Track{
         "track-3",
         mvlab::TrackType::text,
         "Lyrics",
         {},
         {
-            mvlab::TextClip{"clip-3", "Verse one", 0, 2000000},
-            mvlab::TextClip{"clip-4", "Verse two", 2000000, 2000000}
+            mvlab::TextClip{"clip-3", "Verse one", 0, 2000000, default_presentation},
+            mvlab::TextClip{"clip-4", "Verse two", 2000000, 2000000, default_presentation}
         }
     });
 
@@ -1252,12 +1253,13 @@ TEST_CASE("Project model: missing media asset reference fails", "[project_model]
 TEST_CASE("Project model: text-only timeline succeeds without assets", "[project_model][asset_references]")
 {
     auto project = mvlab::create_project("Text Only").value();
+    auto default_presentation = mvlab::make_text_presentation_preset(mvlab::TextPresentationPreset::clean_centered).value();
     project.timeline.tracks.push_back(mvlab::Track{
         "track-1",
         mvlab::TrackType::text,
         "Lyrics",
         {},
-        {mvlab::TextClip{"clip-1", "Hello", 0, 1000000}}
+        {mvlab::TextClip{"clip-1", "Hello", 0, 1000000, default_presentation}}
     });
 
     auto outcome = mvlab::validate_project(project);

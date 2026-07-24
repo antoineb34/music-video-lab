@@ -133,6 +133,15 @@ Result<void> validate_text_clip(const TextClip& clip)
         };
     }
 
+    auto presentation_validation = validate_text_presentation(clip.presentation);
+    if (!presentation_validation) {
+        return Error{
+            ErrorCode::invalid_argument,
+            "Invalid text presentation: " + presentation_validation.error().message,
+            std::nullopt
+        };
+    }
+
     return Result<void>{};
 }
 
@@ -1231,7 +1240,8 @@ Result<ClipId> split_text_clip(
         right_clip_id,
         mutable_clip.value()->text,
         split_time,
-        right_duration
+        right_duration,
+        mutable_clip.value()->presentation
     };
 
     mutable_clip.value()->duration = left_duration;
